@@ -1,8 +1,17 @@
 #pragma once
 
-#include <JuceHeader.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_utils/juce_audio_utils.h>
 
-class UhbikWrapperAudioProcessor  : public juce::AudioProcessor
+struct EffectSlot
+{
+    std::unique_ptr<juce::AudioPluginInstance> plugin;
+    juce::PluginDescription description;
+    bool bypassed = false;
+};
+
+class UhbikWrapperAudioProcessor  : public juce::AudioProcessor,
+                                    public juce::ChangeBroadcaster
 {
 public:
     UhbikWrapperAudioProcessor();
@@ -16,6 +25,7 @@ public:
    #endif
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
@@ -36,13 +46,24 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // --- Hosting Infrastructure ---
-    // This manager handles finding and creating plugin instances
+    // --- Plugin Hosting Infrastructure ---
     juce::AudioPluginFormatManager pluginFormatManager;
-    
-    // We will eventually store our chain of plugins here
-    // For now, we just set up the manager
-    
+    juce::KnownPluginList knownPluginList;
+
+    // Effect chain - use atomic flag to prevent concurrent access
+    std::vector<EffectSlot> effectChain;
+    std::atomic<bool> chainBusy{false};
+
+    // Chain management methods
+    void scanForPlugins();
+    void addPlugin(const juce::PluginDescription& desc);
+    void removePlugin(int index);
+    void movePlugin(int fromIndex, int toIndex);
+    void setPluginBypassed(int index, bool bypassed);
+    juce::AudioPluginInstance* getPluginAt(int index);
+    int getChainSize() const { return static_cast<int>(effectChain.size()); }
+    const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

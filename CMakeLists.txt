@@ -26,9 +26,20 @@ juce_add_plugin(UhbikWrapper
     PRODUCT_NAME "Uhbik Wrapper"
 )
 
+target_sources(UhbikWrapper PRIVATE
+    Source/PluginProcessor.cpp
+    Source/PluginProcessor.h
+    Source/PluginEditor.cpp
+    Source/PluginEditor.h
+    Source/EffectSlot.cpp
+    Source/EffectSlot.h
+)
+
 target_compile_definitions(UhbikWrapper PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_PLUGINHOST_VST3=1
 )
 
 target_link_libraries(UhbikWrapper PRIVATE
