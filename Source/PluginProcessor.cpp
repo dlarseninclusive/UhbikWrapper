@@ -14,6 +14,7 @@ UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
 {
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
     scanForPlugins();
+    ensurePresetsFolderExists();
 }
 
 UhbikWrapperAudioProcessor::~UhbikWrapperAudioProcessor()
@@ -414,6 +415,23 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
 
     std::cerr << "[RACK] State restored. Chain size: " << effectChain.size() << std::endl << std::flush;
     sendChangeMessage();
+}
+
+juce::File UhbikWrapperAudioProcessor::getPresetsFolder()
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+        .getChildFile("UhbikWrapper")
+        .getChildFile("Presets");
+}
+
+void UhbikWrapperAudioProcessor::ensurePresetsFolderExists()
+{
+    auto folder = getPresetsFolder();
+    if (!folder.exists())
+    {
+        folder.createDirectory();
+        std::cerr << "[RACK] Created presets folder: " << folder.getFullPathName() << std::endl << std::flush;
+    }
 }
 
 // This creates new instances of the plugin..

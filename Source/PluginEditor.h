@@ -4,13 +4,15 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "PluginProcessor.h"
 #include "EffectSlot.h"
+#include "PresetBrowser.h"
 
 class UhbikWrapperAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                           private juce::Timer,
                                           private juce::ChangeListener,
                                           private juce::ComboBox::Listener,
                                           private juce::Button::Listener,
-                                          public EffectSlotComponent::Listener
+                                          public EffectSlotComponent::Listener,
+                                          public PresetBrowser::Listener
 {
 public:
     UhbikWrapperAudioProcessorEditor (UhbikWrapperAudioProcessor&);
@@ -24,6 +26,10 @@ public:
     void effectSlotRemoveClicked(int slotIndex) override;
     void effectSlotMoveUpClicked(int slotIndex) override;
     void effectSlotMoveDownClicked(int slotIndex) override;
+
+    // PresetBrowser::Listener
+    void presetSelected(const juce::File& presetFile) override;
+    void savePresetRequested(const juce::File& folder, const juce::String& name) override;
 
 private:
     void timerCallback() override;
@@ -41,12 +47,14 @@ private:
     juce::Viewport chainViewport;
     juce::Component chainContainer;
     std::vector<std::unique_ptr<EffectSlotComponent>> slotComponents;
+    std::vector<juce::PluginDescription> effectPlugins; // Effects only (no instruments)
 
     juce::ComboBox pluginSelector;
     juce::TextButton addButton{"+"};
     juce::TextButton viewMenuButton{"View"};
 
     float uiScale = 1.0f;
+    std::unique_ptr<PresetBrowser> presetBrowser;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::vector<std::unique_ptr<juce::DialogWindow>> pluginEditorWindows;

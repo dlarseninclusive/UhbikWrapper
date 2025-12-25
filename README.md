@@ -12,6 +12,12 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
     - **Bypass**: Toggle effect on/off without removing it
     - **Remove**: Delete effect from chain
     - **Reorder**: Move effects up/down in the chain
+*   **Preset Browser**: Always-visible folder-based preset browser with:
+    - Hierarchical folder navigation
+    - Click to select, Load button to apply presets
+    - Save presets with custom names
+    - Create new folders for organization
+    - Per-preset notes with Edit popup
 *   **Preset System**: Save and load entire effect chains as `.uhbikchain` files
 *   **UI Zoom**: Scale the interface from 100% to 300%
 *   **Transparent Hosting**: Passes audio directly through the chain with zero added coloration
@@ -38,12 +44,19 @@ The project includes an automated setup script that installs dependencies and co
 ## Usage
 
 1.  **Load in DAW**: The plugin auto-installs to `~/.vst3/` so your DAW should find it automatically
-2.  **Add Effects**: Use the dropdown to select a plugin and click [+] to add it to the chain
+2.  **Add Effects**: Use the dropdown to select a plugin, it will be added automatically
 3.  **Edit Effects**: Click "Edit" on any effect to open its native GUI
 4.  **Reorder**: Use the up/down arrows to change effect order
-5.  **Save Presets**: View menu > Save Preset to save your chain
-6.  **Load Presets**: View menu > Load Preset to restore a saved chain
-7.  **Zoom**: View menu > select zoom level (100%, 150%, 200%, 300%)
+5.  **Preset Browser** (left panel):
+    - Select a folder from the dropdown to navigate
+    - Click a preset to select it, then click "Load" to apply
+    - Double-click a preset to load it immediately
+    - Type a name and click "Save" to save current chain
+    - Click "New Folder" to create subfolders
+    - Click "Edit" next to Notes to add preset descriptions
+6.  **Zoom**: View menu > select zoom level (100%, 150%, 200%, 300%)
+
+Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 
 ## Project Structure
 
@@ -53,6 +66,8 @@ The project includes an automated setup script that installs dependencies and co
 *   `Source/PluginEditor.h`: Editor component declarations
 *   `Source/EffectSlot.cpp`: Individual effect slot UI component
 *   `Source/EffectSlot.h`: Slot component with Edit/Bypass/Remove buttons
+*   `Source/PresetBrowser.cpp`: Folder-based preset browser component
+*   `Source/PresetBrowser.h`: Preset browser with save/load/notes functionality
 *   `CMakeLists.txt`: Build configuration that fetches JUCE automatically
 *   `setup.sh`: Automated dependency installer and builder
 
@@ -63,7 +78,7 @@ The project includes an automated setup script that installs dependencies and co
 - [x] **Plugin Scanner**: Discover available VST3 plugins
 - [x] **Effect Reordering**: Move effects up/down in the chain
 - [x] **UI Zoom**: Scale interface for different screen sizes
-- [ ] **Preset Browser**: Folder-based preset organization like Uhbik's browser
+- [x] **Preset Browser**: Folder-based preset organization with notes
 - [ ] **DAW Parameter Exposure**: Show loaded plugin names in DAW interface
 - [ ] **Macro Knobs**: Add knobs mapped to internal plugin parameters
 

@@ -64,6 +64,10 @@ public:
     int getChainSize() const { return static_cast<int>(effectChain.size()); }
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
 
+    // Preset management
+    static juce::File getPresetsFolder();
+    static void ensurePresetsFolderExists();
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

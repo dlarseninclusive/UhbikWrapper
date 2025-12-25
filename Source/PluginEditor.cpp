@@ -5,14 +5,22 @@
 UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapperAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    setSize (500, 500);
+    setSize (700, 500);
     setResizable(true, true);
-    setResizeLimits(400, 300, 2000, 2000);
+    setResizeLimits(500, 300, 2000, 2000);
+    setWantsKeyboardFocus(true);
 
     audioProcessor.addChangeListener(this);
 
+    // Preset browser (always visible)
+    presetBrowser = std::make_unique<PresetBrowser>(UhbikWrapperAudioProcessor::getPresetsFolder());
+    presetBrowser->setListener(this);
+    addAndMakeVisible(*presetBrowser);
+    presetBrowser->setBounds(0, 0, 200, 500);
+
     chainViewport.setViewedComponent(&chainContainer, false);
     chainViewport.setScrollBarsShown(true, false);
+    chainViewport.setScrollBarThickness(12);
     addAndMakeVisible(chainViewport);
 
     pluginSelector.setTextWhenNothingSelected("Select plugin to add...");
@@ -59,8 +67,18 @@ void UhbikWrapperAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadc
     refreshChainDisplay();
 }
 
-void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox*)
+void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
 {
+    if (comboBox == &pluginSelector)
+    {
+        int selectedIndex = pluginSelector.getSelectedItemIndex();
+        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(effectPlugins.size()))
+        {
+            std::cerr << "[UI] Auto-adding plugin: " << effectPlugins[static_cast<size_t>(selectedIndex)].name << std::endl << std::flush;
+            audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
+            pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification); // Reset selection
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
@@ -68,14 +86,10 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
     if (button == &addButton)
     {
         int selectedIndex = pluginSelector.getSelectedItemIndex();
-        if (selectedIndex >= 0)
+        if (selectedIndex >= 0 && selectedIndex < static_cast<int>(effectPlugins.size()))
         {
-            auto& pluginList = audioProcessor.getKnownPluginList();
-            auto types = pluginList.getTypes();
-            if (selectedIndex < static_cast<int>(types.size()))
-            {
-                audioProcessor.addPlugin(types[static_cast<size_t>(selectedIndex)]);
-            }
+            audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
+            pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification);
         }
     }
     else if (button == &viewMenuButton)
@@ -87,14 +101,24 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
 void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
 {
     pluginSelector.clear();
+    effectPlugins.clear();
 
     auto& pluginList = audioProcessor.getKnownPluginList();
     auto types = pluginList.getTypes();
 
-    std::cerr << "[UI] Populating selector with " << types.size() << " plugins" << std::endl << std::flush;
+    // Filter for effects only (no instruments)
+    for (const auto& desc : types)
+    {
+        if (!desc.isInstrument)
+        {
+            effectPlugins.push_back(desc);
+        }
+    }
+
+    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (filtered from " << types.size() << " total)" << std::endl << std::flush;
 
     int id = 1;
-    for (const auto& desc : types)
+    for (const auto& desc : effectPlugins)
     {
         pluginSelector.addItem(desc.name, id++);
     }
@@ -107,14 +131,16 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
     int chainSize = audioProcessor.getChainSize();
     int slotHeight = 60;
     int slotSpacing = 4;
-    int padding = 8;
+    int leftPadding = 8;
+    int rightPadding = 20;  // More space for scrollbar
+    int topPadding = 8;
 
-    int containerWidth = chainViewport.getWidth() - 20;
-    if (containerWidth < 400) containerWidth = 400;
+    int containerWidth = chainViewport.getWidth();
+    if (containerWidth < 100) containerWidth = 300;  // Fallback if not yet sized
 
     chainContainer.setSize(
-        containerWidth,
-        chainSize > 0 ? chainSize * (slotHeight + slotSpacing) + padding * 2 : 100
+        containerWidth - rightPadding,
+        chainSize > 0 ? chainSize * (slotHeight + slotSpacing) + topPadding * 2 : 100
     );
 
     for (int i = 0; i < chainSize; ++i)
@@ -130,13 +156,13 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
             canMoveDown
         );
         slotComp->setListener(this);
-        slotComp->setBounds(padding, padding + i * (slotHeight + slotSpacing),
-                            containerWidth - padding * 2, slotHeight);
+        slotComp->setBounds(leftPadding, topPadding + i * (slotHeight + slotSpacing),
+                            containerWidth - leftPadding - rightPadding, slotHeight);
         chainContainer.addAndMakeVisible(slotComp.get());
         slotComponents.push_back(std::move(slotComp));
     }
 
-    repaint();
+    chainContainer.repaint();
 }
 
 void UhbikWrapperAudioProcessorEditor::effectSlotEditClicked(int slotIndex)
@@ -206,40 +232,44 @@ void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
 
 void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // Dark rack background
-    g.fillAll (juce::Colour (0xff1a1a1a));
+    // Preset browser width offset
+    int browserWidth = 200;
 
-    // Header bar with gradient
-    juce::ColourGradient headerGradient(juce::Colour(0xffff8800), 0, 0,
-                                         juce::Colour(0xffcc5500), 0, 50, false);
+    // Dark rack background (only rack area, not preset browser)
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(browserWidth, 0, getWidth() - browserWidth, getHeight());
+
+    // Header bar with gradient (after preset browser)
+    juce::ColourGradient headerGradient(juce::Colour(0xffff8800), static_cast<float>(browserWidth), 0,
+                                         juce::Colour(0xffcc5500), static_cast<float>(browserWidth), 50, false);
     g.setGradientFill(headerGradient);
-    g.fillRect(0, 0, getWidth(), 50);
+    g.fillRect(browserWidth, 0, getWidth() - browserWidth, 50);
 
-    // Header text
+    // Header text (after preset browser)
     g.setColour(juce::Colours::black);
     g.setFont(juce::Font(22.0f, juce::Font::bold));
-    g.drawFittedText("EFFECT RACK", 15, 0, 250, 50, juce::Justification::centredLeft, 1);
+    g.drawFittedText("EFFECT RACK", browserWidth + 15, 0, 250, 50, juce::Justification::centredLeft, 1);
 
-    // Rack rails on left and right
+    // Rack rails on left and right (after preset browser)
     g.setColour(juce::Colour(0xff2a2a2a));
-    g.fillRect(0, 50, 15, getHeight() - 80);
+    g.fillRect(browserWidth, 50, 15, getHeight() - 80);
     g.fillRect(getWidth() - 15, 50, 15, getHeight() - 80);
 
     // Rail holes
     g.setColour(juce::Colour(0xff1a1a1a));
     for (int y = 70; y < getHeight() - 50; y += 30)
     {
-        g.fillEllipse(4.0f, static_cast<float>(y), 7.0f, 7.0f);
+        g.fillEllipse(static_cast<float>(browserWidth + 4), static_cast<float>(y), 7.0f, 7.0f);
         g.fillEllipse(static_cast<float>(getWidth() - 11), static_cast<float>(y), 7.0f, 7.0f);
     }
 
-    // Footer bar
+    // Footer bar (after preset browser)
     g.setColour(juce::Colour(0xff2a2a2a));
-    g.fillRect(0, getHeight() - 30, getWidth(), 30);
+    g.fillRect(browserWidth, getHeight() - 30, getWidth() - browserWidth, 30);
 
     g.setColour(juce::Colours::lightgrey);
     g.setFont(12.0f);
-    g.drawFittedText(statusMessage, 0, getHeight() - 30, getWidth(), 30, juce::Justification::centred, 1);
+    g.drawFittedText(statusMessage, browserWidth, getHeight() - 30, getWidth() - browserWidth, 30, juce::Justification::centred, 1);
 
     // Empty state message
     if (audioProcessor.getChainSize() == 0)
@@ -247,7 +277,7 @@ void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
         auto emptyBounds = chainViewport.getBounds();
         g.setColour(juce::Colour(0xff666666));
         g.setFont(16.0f);
-        g.drawFittedText("Select a plugin above and click [+] to add to the rack",
+        g.drawFittedText("Select a plugin from the dropdown to add to the rack",
                          emptyBounds, juce::Justification::centred, 2);
     }
 }
@@ -256,20 +286,27 @@ void UhbikWrapperAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds();
 
+    // Preset browser on left (always visible) - always reserve space
+    int browserWidth = 200;
+    auto browserBounds = bounds.removeFromLeft(browserWidth);
+    if (presetBrowser != nullptr)
+    {
+        presetBrowser->setBounds(browserBounds);
+    }
+
     // Header area
     auto headerBounds = bounds.removeFromTop(50);
-    auto padding = 15;
-    int buttonY = (headerBounds.getHeight() - 28) / 2;
+    int buttonY = 11;  // Center buttons vertically in 50px header
 
     // Right side: [selector] [+]
     int addBtnWidth = 40;
-    int selectorWidth = juce::jmin(220, getWidth() / 3);
+    int selectorWidth = juce::jmin(200, bounds.getWidth() / 3);
 
-    addButton.setBounds(headerBounds.getRight() - addBtnWidth - padding, buttonY, addBtnWidth, 28);
+    addButton.setBounds(getWidth() - addBtnWidth - 15, buttonY, addBtnWidth, 28);
     pluginSelector.setBounds(addButton.getX() - selectorWidth - 6, buttonY, selectorWidth, 28);
 
-    // View menu button after title
-    viewMenuButton.setBounds(145, buttonY, 50, 28);
+    // View menu button after title (EFFECT RACK is at browserWidth + 15, ~140px wide)
+    viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
 
     // Footer area
     bounds.removeFromBottom(30);
@@ -363,11 +400,6 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
     menu.addItem(3, "200%", true, uiScale == 2.0f);
     menu.addItem(4, "300%", true, uiScale == 3.0f);
 
-    menu.addSeparator();
-    menu.addSectionHeader("Presets");
-    menu.addItem(10, "Save Preset...");
-    menu.addItem(11, "Load Preset...");
-
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&viewMenuButton),
         [this](int result)
         {
@@ -377,9 +409,35 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
                 case 2: setUIScale(1.5f); break;
                 case 3: setUIScale(2.0f); break;
                 case 4: setUIScale(3.0f); break;
-                case 10: savePreset(); break;
-                case 11: loadPreset(); break;
                 default: break;
             }
         });
+}
+
+void UhbikWrapperAudioProcessorEditor::presetSelected(const juce::File& presetFile)
+{
+    std::cerr << "[UI] Loading preset: " << presetFile.getFullPathName() << std::endl << std::flush;
+
+    juce::MemoryBlock stateData;
+    if (presetFile.loadFileAsData(stateData))
+    {
+        audioProcessor.setStateInformation(stateData.getData(), static_cast<int>(stateData.getSize()));
+    }
+}
+
+void UhbikWrapperAudioProcessorEditor::savePresetRequested(const juce::File& folder, const juce::String& name)
+{
+    auto file = folder.getChildFile(name + ".uhbikchain");
+
+    std::cerr << "[UI] Saving preset to: " << file.getFullPathName() << std::endl << std::flush;
+
+    juce::MemoryBlock stateData;
+    audioProcessor.getStateInformation(stateData);
+
+    if (file.replaceWithData(stateData.getData(), stateData.getSize()))
+    {
+        std::cerr << "[UI] Preset saved successfully" << std::endl << std::flush;
+        if (presetBrowser != nullptr)
+            presetBrowser->refresh();
+    }
 }

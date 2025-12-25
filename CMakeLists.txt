@@ -33,6 +33,8 @@ target_sources(UhbikWrapper PRIVATE
     Source/PluginEditor.h
     Source/EffectSlot.cpp
     Source/EffectSlot.h
+    Source/PresetBrowser.cpp
+    Source/PresetBrowser.h
 )
 
 target_compile_definitions(UhbikWrapper PUBLIC
