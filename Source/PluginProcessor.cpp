@@ -4,12 +4,75 @@
 #include <thread>
 #include <chrono>
 
+juce::AudioProcessorValueTreeState::ParameterLayout UhbikWrapperAudioProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    // Master input/output gain
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("master_input_gain", 1),
+        "Master Input Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("master_output_gain", 1),
+        "Master Output Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    // 8 Macro knobs (0-1 range, automatable by DAW)
+    for (int i = 0; i < NUM_MACROS; ++i)
+    {
+        juce::String id = "macro_" + juce::String(i + 1);
+        juce::String name = "Macro " + juce::String(i + 1);
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID(id, 1),
+            name,
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f),
+            0.0f));
+    }
+
+    // Per-slot parameters (bypass, wet/dry, gain) for MAX_SLOTS
+    for (int i = 0; i < MAX_SLOTS; ++i)
+    {
+        juce::String slotNum = juce::String(i + 1);
+
+        // Bypass
+        params.push_back(std::make_unique<juce::AudioParameterBool>(
+            juce::ParameterID("slot_" + slotNum + "_bypass", 1),
+            "Slot " + slotNum + " Bypass",
+            false));
+
+        // Wet/Dry mix (0-100%)
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID("slot_" + slotNum + "_wetdry", 1),
+            "Slot " + slotNum + " Wet/Dry",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f,
+            juce::AudioParameterFloatAttributes().withLabel("%")));
+
+        // Gain (-24 to +24 dB)
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID("slot_" + slotNum + "_gain", 1),
+            "Slot " + slotNum + " Gain",
+            juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel("dB")));
+    }
+
+    return { params.begin(), params.end() };
+}
+
 UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                       )
+                       ),
+       apvts(*this, nullptr, "Parameters", createParameterLayout())
 #endif
 {
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
@@ -133,6 +196,12 @@ void UhbikWrapperAudioProcessor::setPluginBypassed(int index, bool bypassed)
     if (index >= 0 && index < static_cast<int>(effectChain.size()))
     {
         effectChain[static_cast<size_t>(index)].bypassed = bypassed;
+
+        // Sync to APVTS parameter
+        juce::String slotNum = juce::String(index + 1);
+        if (auto* param = apvts.getParameter("slot_" + slotNum + "_bypass"))
+            param->setValueNotifyingHost(bypassed ? 1.0f : 0.0f);
+
         sendChangeMessage();
     }
 }
@@ -259,14 +328,100 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (chainBusy.load())
         return;
 
+    // Apply master input gain
+    float masterInGainDb = apvts.getRawParameterValue("master_input_gain")->load();
+    float masterInGain = juce::Decibels::decibelsToGain(masterInGainDb);
+    if (masterInGain != 1.0f)
+        buffer.applyGain(masterInGain);
+
+    // Capture master input level (RMS of first channel, or average of stereo)
+    float inLevel = 0.0f;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        inLevel += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+    masterInputLevel.store(inLevel / static_cast<float>(buffer.getNumChannels()));
+
+    // Process effect chain
     for (size_t i = 0; i < effectChain.size(); ++i)
     {
         auto& slot = effectChain[i];
+        juce::String slotNum = juce::String(static_cast<int>(i) + 1);
+
+        // Read parameters from APVTS
+        bool bypassed = apvts.getRawParameterValue("slot_" + slotNum + "_bypass")->load() > 0.5f;
+        float wetDryPercent = apvts.getRawParameterValue("slot_" + slotNum + "_wetdry")->load();
+        float slotGainDb = apvts.getRawParameterValue("slot_" + slotNum + "_gain")->load();
+
+        // Sync to slot struct for UI access
+        slot.bypassed = bypassed;
+        slot.wetDryMix = wetDryPercent / 100.0f;
+        slot.gainDb = slotGainDb;
+
         if (slot.plugin != nullptr && !slot.bypassed)
         {
+            // Capture input level
+            float slotInLevel = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                slotInLevel += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+            slot.inputLevel.store(slotInLevel / static_cast<float>(buffer.getNumChannels()));
+
+            // Store dry signal for wet/dry mixing
+            juce::AudioBuffer<float> dryBuffer;
+            if (slot.wetDryMix < 1.0f)
+            {
+                dryBuffer.makeCopyOf(buffer);
+            }
+
+            // Process through plugin (wet signal)
             slot.plugin->processBlock(buffer, midiMessages);
+
+            // Apply slot gain to wet signal
+            float slotGain = juce::Decibels::decibelsToGain(slot.gainDb);
+            if (slotGain != 1.0f)
+                buffer.applyGain(slotGain);
+
+            // Mix wet/dry
+            if (slot.wetDryMix < 1.0f)
+            {
+                float wet = slot.wetDryMix;
+                float dry = 1.0f - wet;
+
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                {
+                    auto* wetData = buffer.getWritePointer(ch);
+                    auto* dryData = dryBuffer.getReadPointer(ch);
+
+                    for (int s = 0; s < buffer.getNumSamples(); ++s)
+                    {
+                        wetData[s] = wetData[s] * wet + dryData[s] * dry;
+                    }
+                }
+            }
+
+            // Capture output level
+            float slotOutLevel = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                slotOutLevel += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+            slot.outputLevel.store(slotOutLevel / static_cast<float>(buffer.getNumChannels()));
+        }
+        else
+        {
+            // Bypassed - set levels to 0
+            slot.inputLevel.store(0.0f);
+            slot.outputLevel.store(0.0f);
         }
     }
+
+    // Apply master output gain
+    float masterOutGainDb = apvts.getRawParameterValue("master_output_gain")->load();
+    float masterOutGain = juce::Decibels::decibelsToGain(masterOutGainDb);
+    if (masterOutGain != 1.0f)
+        buffer.applyGain(masterOutGain);
+
+    // Capture master output level
+    float outLevel = 0.0f;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        outLevel += buffer.getRMSLevel(ch, 0, buffer.getNumSamples());
+    masterOutputLevel.store(outLevel / static_cast<float>(buffer.getNumChannels()));
 }
 
 bool UhbikWrapperAudioProcessor::hasEditor() const
@@ -284,8 +439,12 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
     std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
-    state.setProperty("version", 1, nullptr);
+    state.setProperty("version", 2, nullptr);  // Version 2 includes APVTS
     state.setProperty("chainSize", static_cast<int>(effectChain.size()), nullptr);
+
+    // Save APVTS parameters state
+    auto apvtsState = apvts.copyState();
+    state.addChild(apvtsState, -1, nullptr);
 
     for (size_t i = 0; i < effectChain.size(); ++i)
     {
@@ -293,6 +452,8 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         juce::ValueTree slotState("Slot");
         slotState.setProperty("index", static_cast<int>(i), nullptr);
         slotState.setProperty("bypassed", slot.bypassed, nullptr);
+        slotState.setProperty("wetDryMix", slot.wetDryMix, nullptr);
+        slotState.setProperty("gainDb", slot.gainDb, nullptr);
         slotState.setProperty("pluginName", slot.description.name, nullptr);
 
         auto descXml = slot.description.createXml();
@@ -345,10 +506,20 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
         return;
     }
 
+    int version = state.getProperty("version", 1);
     int savedChainSize = state.getProperty("chainSize", 0);
-    std::cerr << "[RACK] Restoring " << savedChainSize << " plugins" << std::endl << std::flush;
+    std::cerr << "[RACK] Restoring " << savedChainSize << " plugins (version " << version << ")" << std::endl << std::flush;
+
+    // Restore APVTS state (version 2+)
+    auto apvtsState = state.getChildWithName("Parameters");
+    if (apvtsState.isValid())
+    {
+        apvts.replaceState(apvtsState);
+        std::cerr << "[RACK] APVTS state restored" << std::endl << std::flush;
+    }
 
     std::vector<EffectSlot> newChain;
+    int slotIndex = 0;
 
     for (int i = 0; i < state.getNumChildren(); ++i)
     {
@@ -357,7 +528,7 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             continue;
 
         juce::String pluginName = slotState.getProperty("pluginName", "Unknown");
-        std::cerr << "[RACK] Restoring slot " << i << ": " << pluginName << std::endl << std::flush;
+        std::cerr << "[RACK] Restoring slot " << slotIndex << ": " << pluginName << std::endl << std::flush;
 
         juce::String descXmlStr = slotState.getProperty("description").toString();
         auto descElement = juce::XmlDocument::parse(descXmlStr);
@@ -398,9 +569,21 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             slot.plugin = std::move(plugin);
             slot.description = desc;
             slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
+            slot.wetDryMix = static_cast<float>(slotState.getProperty("wetDryMix", 1.0f));
+            slot.gainDb = static_cast<float>(slotState.getProperty("gainDb", 0.0f));
+
+            // Sync to APVTS parameters
+            juce::String slotNum = juce::String(slotIndex + 1);
+            if (auto* param = apvts.getParameter("slot_" + slotNum + "_bypass"))
+                param->setValueNotifyingHost(slot.bypassed ? 1.0f : 0.0f);
+            if (auto* param = apvts.getParameter("slot_" + slotNum + "_wetdry"))
+                param->setValueNotifyingHost(slot.wetDryMix);
+            if (auto* param = apvts.getParameter("slot_" + slotNum + "_gain"))
+                param->setValueNotifyingHost(param->convertTo0to1(slot.gainDb));
 
             newChain.push_back(std::move(slot));
             std::cerr << "[RACK] Plugin restored successfully" << std::endl << std::flush;
+            slotIndex++;
         }
         else
         {
@@ -431,6 +614,23 @@ void UhbikWrapperAudioProcessor::ensurePresetsFolderExists()
     {
         folder.createDirectory();
         std::cerr << "[RACK] Created presets folder: " << folder.getFullPathName() << std::endl << std::flush;
+    }
+}
+
+void UhbikWrapperAudioProcessor::syncParametersToState()
+{
+    // Sync APVTS parameters to internal slot state
+    for (size_t i = 0; i < effectChain.size() && i < MAX_SLOTS; ++i)
+    {
+        auto& slot = effectChain[i];
+        juce::String slotNum = juce::String(static_cast<int>(i) + 1);
+
+        if (auto* param = apvts.getParameter("slot_" + slotNum + "_bypass"))
+            param->setValueNotifyingHost(slot.bypassed ? 1.0f : 0.0f);
+        if (auto* param = apvts.getParameter("slot_" + slotNum + "_wetdry"))
+            param->setValueNotifyingHost(slot.wetDryMix);
+        if (auto* param = apvts.getParameter("slot_" + slotNum + "_gain"))
+            param->setValueNotifyingHost(param->convertTo0to1(slot.gainDb));
     }
 }
 
