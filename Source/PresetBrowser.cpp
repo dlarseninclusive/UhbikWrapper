@@ -32,6 +32,10 @@ PresetBrowser::PresetBrowser(const juce::File& root)
     loadButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
     addAndMakeVisible(loadButton);
 
+    deleteButton.addListener(this);
+    deleteButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffaa3333));
+    addAndMakeVisible(deleteButton);
+
     saveButton.addListener(this);
     saveButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff4466aa));
     addAndMakeVisible(saveButton);
@@ -39,6 +43,10 @@ PresetBrowser::PresetBrowser(const juce::File& root)
     newFolderButton.addListener(this);
     newFolderButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
     addAndMakeVisible(newFolderButton);
+
+    openFolderButton.addListener(this);
+    openFolderButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
+    addAndMakeVisible(openFolderButton);
 
     presetNameEditor.setTextToShowWhenEmpty("Preset name...", juce::Colours::grey);
     presetNameEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff2a2a2a));
@@ -77,8 +85,10 @@ PresetBrowser::PresetBrowser(const juce::File& root)
 PresetBrowser::~PresetBrowser()
 {
     loadButton.removeListener(this);
+    deleteButton.removeListener(this);
     saveButton.removeListener(this);
     newFolderButton.removeListener(this);
+    openFolderButton.removeListener(this);
     editNotesButton.removeListener(this);
 }
 
@@ -167,13 +177,17 @@ void PresetBrowser::resized()
     // Header
     bounds.removeFromTop(30);
 
-    // Folder selector
+    // Folder selector row with open button
     auto folderArea = bounds.removeFromTop(28);
+    openFolderButton.setBounds(folderArea.removeFromRight(50).reduced(2, 2));
     folderSelector.setBounds(folderArea.reduced(4, 2));
 
-    // Load button row
+    // Load/Delete button row
     auto loadArea = bounds.removeFromBottom(32);
-    loadButton.setBounds(loadArea.reduced(4, 2));
+    auto loadBounds = loadArea.reduced(4, 2);
+    loadButton.setBounds(loadBounds.removeFromLeft(loadBounds.getWidth() * 2 / 3 - 2));
+    loadBounds.removeFromLeft(4);
+    deleteButton.setBounds(loadBounds);
 
     // Save area at bottom
     auto saveArea = bounds.removeFromBottom(60);
@@ -268,6 +282,69 @@ void PresetBrowser::buttonClicked(juce::Button* button)
         {
             std::cerr << "[PresetBrowser] Loading preset via button: " << selectedPreset.getFileName() << std::endl;
             listener->presetSelected(selectedPreset);
+        }
+    }
+    else if (button == &deleteButton)
+    {
+        if (selectedPreset.exists())
+        {
+            // Delete preset with confirmation
+            auto* alertWindow = new juce::AlertWindow("Delete Preset",
+                "Are you sure you want to delete \"" + selectedPreset.getFileNameWithoutExtension() + "\"?",
+                juce::MessageBoxIconType::WarningIcon);
+            alertWindow->addButton("Delete", 1);
+            alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+            alertWindow->enterModalState(true, juce::ModalCallbackFunction::create(
+                [this, alertWindow](int result)
+                {
+                    if (result == 1)
+                    {
+                        // Delete the preset file
+                        if (selectedPreset.deleteFile())
+                        {
+                            // Also delete notes file if it exists
+                            getNotesFile(selectedPreset).deleteFile();
+                            std::cerr << "[PresetBrowser] Deleted preset: " << selectedPreset.getFileName() << std::endl;
+                            selectedPreset = juce::File();
+                            refresh();
+                        }
+                    }
+                    delete alertWindow;
+                }), true);
+        }
+        else if (currentFolder.exists() && currentFolder != rootFolder)
+        {
+            // Delete current folder with confirmation
+            auto* alertWindow = new juce::AlertWindow("Delete Folder",
+                "Are you sure you want to delete folder \"" + currentFolder.getFileName() + "\" and all its contents?",
+                juce::MessageBoxIconType::WarningIcon);
+            alertWindow->addButton("Delete", 1);
+            alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+            alertWindow->enterModalState(true, juce::ModalCallbackFunction::create(
+                [this, alertWindow](int result)
+                {
+                    if (result == 1)
+                    {
+                        juce::File folderToDelete = currentFolder;
+                        currentFolder = rootFolder;
+                        if (folderToDelete.deleteRecursively())
+                        {
+                            std::cerr << "[PresetBrowser] Deleted folder: " << folderToDelete.getFileName() << std::endl;
+                            refresh();
+                        }
+                    }
+                    delete alertWindow;
+                }), true);
+        }
+    }
+    else if (button == &openFolderButton)
+    {
+        // Open current folder in file manager
+        if (currentFolder.exists())
+        {
+            currentFolder.revealToUser();
         }
     }
     else if (button == &editNotesButton)

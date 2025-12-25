@@ -54,8 +54,10 @@ private:
     juce::ComboBox folderSelector;
     juce::ListBox presetList;
     juce::TextButton loadButton{"Load"};
+    juce::TextButton deleteButton{"Del"};
     juce::TextButton saveButton{"Save"};
     juce::TextButton newFolderButton{"New Folder"};
+    juce::TextButton openFolderButton{"Open"};
     juce::TextButton editNotesButton{"Edit"};
     juce::TextEditor presetNameEditor;
     juce::TextEditor notesEditor;
