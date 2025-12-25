@@ -17,6 +17,8 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
     - Click to select, Load button to apply presets
     - Save presets with custom names
     - Create new folders for organization
+    - Delete presets/folders with confirmation
+    - Open folder in file manager
     - Per-preset notes with Edit popup
 *   **Preset System**: Save and load entire effect chains as `.uhbikchain` files
 *   **UI Zoom**: Scale the interface from 100% to 300%
@@ -73,14 +75,34 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 
 ## Roadmap
 
+### Completed
 - [x] **Plugin Chaining**: Support loading multiple effects in series
 - [x] **Preset Serialization**: Save and load entire chain state
 - [x] **Plugin Scanner**: Discover available VST3 plugins
 - [x] **Effect Reordering**: Move effects up/down in the chain
 - [x] **UI Zoom**: Scale interface for different screen sizes
-- [x] **Preset Browser**: Folder-based preset organization with notes
-- [ ] **DAW Parameter Exposure**: Show loaded plugin names in DAW interface
-- [ ] **Macro Knobs**: Add knobs mapped to internal plugin parameters
+- [x] **Preset Browser**: Folder-based preset organization with notes, delete, open folder
+
+### DAW Integration (Planned)
+- [ ] **DAW Parameter Exposure**: Show loaded plugin names in Bitwig/DAW parameter panel
+- [ ] **Macro Knobs (8)**: Automatable knobs exposed to DAW, assignable to any hosted plugin parameter
+- [ ] **Per-Slot Bypass Parameters**: Automatable bypass per effect slot
+
+### Audio Controls (Planned)
+- [ ] **Wet/Dry Mix**: Per-effect parallel processing control
+- [ ] **Input/Output Gain**: Per-effect gain staging (-24dB to +24dB)
+- [ ] **Master Input/Output Gain**: Global gain controls
+
+### Visualizations (Planned)
+- [ ] **Level Meters**: Per-effect input/output meters with peak hold
+- [ ] **Master Meters**: Input/output meters in footer
+- [ ] **Spectrum Analyzer**: Popup FFT display per effect and master output
+
+### MIDI (Planned)
+- [ ] **MIDI Learn**: Map hardware MIDI CC to macro knobs
+
+### Platform Support (Planned)
+- [ ] **Cross-Platform**: Windows/macOS VST3 path support
 
 ## License
 
