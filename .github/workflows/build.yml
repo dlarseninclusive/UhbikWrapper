@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [master, main]
+    tags: ['v*']
   pull_request:
     branches: [master, main]
   workflow_dispatch:  # Manual trigger
@@ -64,3 +65,51 @@ jobs:
         with:
           name: UhbikWrapper-macOS-AU
           path: build/UhbikWrapper_artefacts/Release/AU/*.component
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create zip files
+        run: |
+          cd artifacts
+          zip -r ../UhbikWrapper-Linux-VST3.zip UhbikWrapper-Linux-VST3/
+          zip -r ../UhbikWrapper-Windows-VST3.zip UhbikWrapper-Windows-VST3/
+          zip -r ../UhbikWrapper-macOS-VST3.zip UhbikWrapper-macOS-VST3/
+          zip -r ../UhbikWrapper-macOS-AU.zip UhbikWrapper-macOS-AU/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            UhbikWrapper-Linux-VST3.zip
+            UhbikWrapper-Windows-VST3.zip
+            UhbikWrapper-macOS-VST3.zip
+            UhbikWrapper-macOS-AU.zip
+          body: |
+            ## Uhbik Wrapper ${{ github.ref_name }}
+
+            A lightweight VST3 wrapper for chaining multiple effects with preset management.
+
+            ### Downloads
+            | Platform | File | Install Location |
+            |----------|------|------------------|
+            | Linux | `UhbikWrapper-Linux-VST3.zip` | `~/.vst3/` |
+            | Windows | `UhbikWrapper-Windows-VST3.zip` | `C:\Program Files\Common Files\VST3\` |
+            | macOS (VST3) | `UhbikWrapper-macOS-VST3.zip` | `~/Library/Audio/Plug-Ins/VST3/` |
+            | macOS (AU) | `UhbikWrapper-macOS-AU.zip` | `~/Library/Audio/Plug-Ins/Components/` |
+
+            > **Note**: macOS builds are unsigned. You may need to right-click → Open or allow in System Settings → Privacy & Security.
+          draft: false
+          prerelease: false
