@@ -3,36 +3,25 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
-// Constants for DAW parameter exposure
-static constexpr int MAX_SLOTS = 16;
-static constexpr int NUM_MACROS = 8;
-
 struct EffectSlot
 {
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::PluginDescription description;
     bool bypassed = false;
-    float wetDryMix = 1.0f;      // 0=dry, 1=wet
-    float gainDb = 0.0f;         // -24 to +24 dB
-    // Level metering data (thread-safe for audio->UI)
-    std::atomic<float> inputLevel{0.0f};
-    std::atomic<float> outputLevel{0.0f};
+    std::atomic<bool> ready{false};  // Set true after prepareToPlay completes
 
-    // Default constructor
     EffectSlot() = default;
+    ~EffectSlot() = default;
 
-    // Move constructor (atomics can't be moved, so copy their values)
+    // Custom move constructor since atomic isn't moveable
     EffectSlot(EffectSlot&& other) noexcept
-        : plugin(std::move(other.plugin)),
-          description(std::move(other.description)),
-          bypassed(other.bypassed),
-          wetDryMix(other.wetDryMix),
-          gainDb(other.gainDb),
-          inputLevel(other.inputLevel.load()),
-          outputLevel(other.outputLevel.load())
+        : plugin(std::move(other.plugin))
+        , description(std::move(other.description))
+        , bypassed(other.bypassed)
+        , ready(other.ready.load())
     {}
 
-    // Move assignment (atomics can't be moved, so copy their values)
+    // Custom move assignment
     EffectSlot& operator=(EffectSlot&& other) noexcept
     {
         if (this != &other)
@@ -40,15 +29,12 @@ struct EffectSlot
             plugin = std::move(other.plugin);
             description = std::move(other.description);
             bypassed = other.bypassed;
-            wetDryMix = other.wetDryMix;
-            gainDb = other.gainDb;
-            inputLevel.store(other.inputLevel.load());
-            outputLevel.store(other.outputLevel.load());
+            ready.store(other.ready.load());
         }
         return *this;
     }
 
-    // Delete copy operations (unique_ptr is not copyable)
+    // Delete copy operations
     EffectSlot(const EffectSlot&) = delete;
     EffectSlot& operator=(const EffectSlot&) = delete;
 };
@@ -93,9 +79,9 @@ public:
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::KnownPluginList knownPluginList;
 
-    // Effect chain - use atomic flag to prevent concurrent access
+    // Effect chain - use SpinLock for audio-safe synchronization
     std::vector<EffectSlot> effectChain;
-    std::atomic<bool> chainBusy{false};
+    juce::SpinLock chainLock;
 
     // Chain management methods
     void scanForPlugins();
@@ -111,26 +97,6 @@ public:
     static juce::File getPresetsFolder();
     static void ensurePresetsFolderExists();
 
-    // DAW Parameter Exposure via APVTS
-    juce::AudioProcessorValueTreeState apvts;
-    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
-
-    // Master level metering
-    std::atomic<float> masterInputLevel{0.0f};
-    std::atomic<float> masterOutputLevel{0.0f};
-
-    // Macro knob mappings (for future use)
-    struct MacroMapping {
-        int slotIndex = -1;
-        int parameterIndex = -1;
-        float rangeMin = 0.0f;
-        float rangeMax = 1.0f;
-    };
-    std::array<std::vector<MacroMapping>, NUM_MACROS> macroMappings;
-
 private:
-    // Parameter listener to sync APVTS with internal state
-    void syncParametersToState();
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

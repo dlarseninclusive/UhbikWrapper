@@ -13,12 +13,6 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
     - **Bypass**: Toggle effect on/off without removing it
     - **Remove**: Delete effect from chain
     - **Reorder**: Move effects up/down in the chain
-    - **Wet/Dry Mix**: Parallel processing control (0-100%)
-    - **Gain**: Per-effect gain staging (-24dB to +24dB)
-*   **DAW Integration**: Full parameter exposure to host DAW
-    - 8 Macro knobs (automatable, ready for parameter mapping)
-    - Per-slot bypass, wet/dry, and gain controls
-    - Master input/output gain
 *   **Preset Browser**: Always-visible folder-based preset browser with:
     - Hierarchical folder navigation
     - Click to select, Load button to apply presets
@@ -30,14 +24,7 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
 *   **Preset System**: Save and load entire effect chains as `.uhbikchain` files
 *   **UI Zoom**: Scale the interface from 100% to 300%
 *   **Transparent Hosting**: Passes audio directly through the chain with zero added coloration
-
-## DAW Parameter Panel
-
-All parameters are exposed to your DAW for automation:
-
-![Bitwig Parameter Panel](docs/bitwig-parameters.png)
-
-*Parameters visible in Bitwig: Master gain, 8 Macro knobs, and per-slot controls (bypass, wet/dry, gain) for 16 effect slots.*
+*   **Thread-Safe Processing**: Uses SpinLock synchronization for stable audio processing
 
 ## Prerequisites (Linux)
 
@@ -81,10 +68,6 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 *   `Source/PluginProcessor.h`: Data structures for effect slots
 *   `Source/PluginEditor.cpp`: Main rack GUI and controls
 *   `Source/PluginEditor.h`: Editor component declarations
-*   `Source/EffectSlot.cpp`: Individual effect slot UI component
-*   `Source/EffectSlot.h`: Slot component with Edit/Bypass/Remove buttons
-*   `Source/PresetBrowser.cpp`: Folder-based preset browser component
-*   `Source/PresetBrowser.h`: Preset browser with save/load/notes functionality
 *   `CMakeLists.txt`: Build configuration that fetches JUCE automatically
 *   `setup.sh`: Automated dependency installer and builder
 
@@ -97,23 +80,27 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 - [x] **Effect Reordering**: Move effects up/down in the chain
 - [x] **UI Zoom**: Scale interface for different screen sizes
 - [x] **Preset Browser**: Folder-based preset organization with notes, delete, open folder
-- [x] **DAW Parameter Exposure**: All parameters visible in Bitwig/DAW parameter panel
-- [x] **Macro Knobs (8)**: Automatable knobs exposed to DAW (mapping UI pending)
-- [x] **Per-Slot Bypass Parameters**: Automatable bypass per effect slot
-- [x] **Wet/Dry Mix**: Per-effect parallel processing control
-- [x] **Input/Output Gain**: Per-effect gain staging (-24dB to +24dB)
-- [x] **Master Input/Output Gain**: Global gain controls
+- [x] **Thread-Safe Audio**: SpinLock-based synchronization for stable hosting
+- [x] **Sidechain Handling**: Automatic disabling of sidechain buses for compatibility
+
+### DAW Integration (Planned)
+- [ ] **DAW Parameter Exposure**: Expose parameters to host DAW via APVTS
+- [ ] **Macro Knobs (8)**: Automatable knobs exposed to DAW
+- [ ] **Per-Slot Parameters**: Bypass, wet/dry, gain per effect slot
+- [ ] **Master Gain**: Global input/output gain controls
+
+### Mixing Controls (Planned)
+- [ ] **Wet/Dry Mix**: Per-effect parallel processing control
+- [ ] **Input/Output Gain**: Per-effect gain staging
 
 ### Visualizations (Planned)
 - [ ] **Level Meters**: Per-effect input/output meters with peak hold
 - [ ] **Master Meters**: Input/output meters in footer
 - [ ] **Spectrum Analyzer**: Popup FFT display per effect and master output
 
-### Macro Mapping UI (Planned)
-- [ ] **Macro Assignment UI**: Right-click to map macros to hosted plugin parameters
-
 ### MIDI (Planned)
 - [ ] **MIDI Learn**: Map hardware MIDI CC to macro knobs
+- [ ] **Macro Assignment UI**: Right-click to map macros to hosted plugin parameters
 
 ### Platform Support (Planned)
 - [ ] **Cross-Platform**: Windows/macOS VST3 path support
