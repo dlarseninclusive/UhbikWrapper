@@ -2,6 +2,7 @@
 
 A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U-he Uhbik** and other VST3 effects. It provides a transparent, "Combinator-like" interface that allows you to chain multiple effects together and manage them as a single meta-preset.
 
+![Uhbik Wrapper Screenshot](docs/screenshot.png)
 
 ## Features
 
