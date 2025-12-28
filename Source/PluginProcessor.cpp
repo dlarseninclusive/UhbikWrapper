@@ -434,6 +434,19 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
 
         if (plugin != nullptr)
         {
+            // Disable sidechain bus if present (same as addPlugin)
+            int numInputBuses = plugin->getBusCount(true);
+            if (numInputBuses > 1)
+            {
+                auto* sidechain = plugin->getBus(true, 1);
+                if (sidechain != nullptr)
+                {
+                    if (debugLogging.load())
+                        std::cerr << "[RACK] Disabling sidechain bus during restore" << std::endl << std::flush;
+                    sidechain->enable(false);
+                }
+            }
+
             plugin->prepareToPlay(
                 getSampleRate() > 0 ? getSampleRate() : 44100.0,
                 getBlockSize() > 0 ? getBlockSize() : 512
