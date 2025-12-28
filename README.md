@@ -192,8 +192,15 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [ ] **MIDI Learn**: Map hardware MIDI CC to macro knobs
 - [ ] **Macro Assignment UI**: Right-click to map macros to hosted plugin parameters
 
+### State Management (Planned)
+- [ ] **Undo/Redo**: Undo changes to effect chain and parameters
+
 ### Platform Support (Planned)
 - [ ] **Code Signing**: macOS notarization and Windows signing for distribution
+
+## Known Issues
+
+- **Editor crash when audio playing (Linux)**: Opening a plugin's editor GUI while audio is playing can crash the plugin. Workaround: Stop playback before clicking Edit. This appears to be related to u-he plugin threading on Linux.
 
 ## License
 

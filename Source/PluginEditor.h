@@ -59,7 +59,7 @@ private:
     std::unique_ptr<PresetBrowser> presetBrowser;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
-    std::vector<std::unique_ptr<juce::DialogWindow>> pluginEditorWindows;
+    std::vector<std::unique_ptr<juce::DocumentWindow>> pluginEditorWindows;
 
     void savePreset();
     void loadPreset();

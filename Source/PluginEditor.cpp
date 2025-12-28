@@ -227,19 +227,48 @@ void UhbikWrapperAudioProcessorEditor::effectSlotMoveDownClicked(int slotIndex)
 
 void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
 {
+    if (slotIndex < 0 || slotIndex >= audioProcessor.getChainSize())
+        return;
+
     auto* plugin = audioProcessor.getPluginAt(slotIndex);
     if (plugin == nullptr || !plugin->hasEditor())
         return;
 
-    auto* editor = plugin->createEditor();
-    if (editor == nullptr)
+    // Check if editor already exists
+    auto* existingEditor = plugin->getActiveEditor();
+    if (existingEditor != nullptr)
+    {
+        if (auto* topLevel = existingEditor->getTopLevelComponent())
+            topLevel->toFront(true);
         return;
+    }
 
-    juce::DialogWindow::LaunchOptions options;
-    options.dialogTitle = plugin->getName();
-    options.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
-    options.content.setOwned(editor);
-    options.launchAsync();
+    // Use a small delay and async call to ensure clean editor creation
+    juce::Timer::callAfterDelay(50, [this, slotIndex]()
+    {
+        if (slotIndex >= audioProcessor.getChainSize())
+            return;
+
+        auto* plug = audioProcessor.getPluginAt(slotIndex);
+        if (plug == nullptr || !plug->hasEditor())
+            return;
+
+        // Double-check no editor appeared in the meantime
+        if (plug->getActiveEditor() != nullptr)
+            return;
+
+        auto* editor = plug->createEditor();
+        if (editor == nullptr)
+            return;
+
+        juce::DialogWindow::LaunchOptions options;
+        options.dialogTitle = plug->getName();
+        options.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
+        options.content.setOwned(editor);
+        options.useNativeTitleBar = true;
+        options.resizable = false;
+        options.launchAsync();
+    });
 }
 
 void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)

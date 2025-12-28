@@ -178,13 +178,14 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
 
         if (debugLogging.load())
             std::cerr << "[RACK] Plugin added to chain. Chain size: " << effectChain.size() << std::endl << std::flush;
-        sendChangeMessage();
     }
     else
     {
         if (debugLogging.load())
             std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
     }
+
+    sendChangeMessage();
 }
 
 void UhbikWrapperAudioProcessor::removePlugin(int index)
