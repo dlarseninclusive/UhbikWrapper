@@ -16,13 +16,19 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
 *   **Preset Browser**: Always-visible folder-based preset browser with:
     - Hierarchical folder navigation
     - Click to select, Load button to apply presets
-    - Save presets with custom names
+    - Save presets with metadata (name, author, tags, notes)
+    - Edit preset metadata and rename presets
+    - Shows plugin list for each preset
     - Create new folders for organization
     - Delete presets/folders with confirmation
     - Open folder in file manager
-    - Per-preset notes with Edit popup
-*   **Preset System**: Save and load entire effect chains as `.uhbikchain` files
-*   **UI Zoom**: Scale the interface from 100% to 300%
+*   **DAW Parameters**: Exposed to host for automation:
+    - Input/Output Gain (-24 to +24 dB)
+    - Dry/Wet Mix (0-100%)
+    - 8 Macro knobs (for future parameter mapping)
+*   **Preset System**: Save and load entire effect chains as `.uhbikchain` XML files
+*   **UI Zoom**: Scale the interface from 100% to 300% (persisted across sessions)
+*   **Sidechain Support**: Routes DAW sidechain input to hosted plugins
 *   **Transparent Hosting**: Passes audio directly through the chain with zero added coloration
 *   **Thread-Safe Processing**: Uses SpinLock synchronization for stable audio processing
 
@@ -55,10 +61,12 @@ The project includes an automated setup script that installs dependencies and co
     - Select a folder from the dropdown to navigate
     - Click a preset to select it, then click "Load" to apply
     - Double-click a preset to load it immediately
-    - Type a name and click "Save" to save current chain
+    - Click "Save" to save current chain with metadata (name, author, tags, notes)
+    - Click "Edit" to modify preset metadata or rename
+    - Selecting a preset shows its plugin list and metadata
     - Click "New Folder" to create subfolders
-    - Click "Edit" next to Notes to add preset descriptions
 6.  **Zoom**: View menu > select zoom level (100%, 150%, 200%, 300%)
+7.  **Debug Logging**: View menu > toggle debug logging to stderr
 
 Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 
@@ -68,6 +76,8 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 *   `Source/PluginProcessor.h`: Data structures for effect slots
 *   `Source/PluginEditor.cpp`: Main rack GUI and controls
 *   `Source/PluginEditor.h`: Editor component declarations
+*   `Source/PresetBrowser.cpp`: Preset browser with metadata support
+*   `Source/EffectSlot.cpp`: Per-effect slot UI component
 *   `CMakeLists.txt`: Build configuration that fetches JUCE automatically
 *   `setup.sh`: Automated dependency installer and builder
 
@@ -75,19 +85,28 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 
 ### Completed
 - [x] **Plugin Chaining**: Support loading multiple effects in series
-- [x] **Preset Serialization**: Save and load entire chain state
+- [x] **Preset Serialization**: Save and load entire chain state with metadata
 - [x] **Plugin Scanner**: Discover available VST3 plugins
 - [x] **Effect Reordering**: Move effects up/down in the chain
-- [x] **UI Zoom**: Scale interface for different screen sizes
-- [x] **Preset Browser**: Folder-based preset organization with notes, delete, open folder
+- [x] **UI Zoom**: Scale interface for different screen sizes (persisted)
+- [x] **Preset Browser**: Folder-based preset organization with metadata
+- [x] **Preset Metadata**: Author, tags, notes, plugin list stored in XML
 - [x] **Thread-Safe Audio**: SpinLock-based synchronization for stable hosting
-- [x] **Sidechain Handling**: Automatic disabling of sidechain buses for compatibility
+- [x] **Sidechain Passthrough**: Routes DAW sidechain input to hosted plugins
+- [x] **DAW Parameters**: Input/output gain, dry/wet mix, 8 macro knobs exposed via APVTS
+
+### Preset Browser (Planned)
+- [ ] **Plugin Availability Filter**: Filter/highlight presets based on installed plugins
+
+### Sidechain Features (Planned)
+- [ ] **Built-in Ducker**: Sidechain-triggered volume ducking independent of hosted plugins
+- [ ] **Duck Amount**: Control how much the input is attenuated when sidechain is active
+- [ ] **Attack/Release**: Envelope controls for ducking response
+- [ ] **Threshold**: Set the sidechain level that triggers ducking
 
 ### DAW Integration (Planned)
-- [ ] **DAW Parameter Exposure**: Expose parameters to host DAW via APVTS
-- [ ] **Macro Knobs (8)**: Automatable knobs exposed to DAW
-- [ ] **Per-Slot Parameters**: Bypass, wet/dry, gain per effect slot
-- [ ] **Master Gain**: Global input/output gain controls
+- [ ] **Macro Parameter Mapping**: Map macro knobs to hosted plugin parameters
+- [ ] **Per-Slot Parameters**: Bypass, wet/dry, gain per effect slot exposed to DAW
 
 ### Mixing Controls (Planned)
 - [ ] **Wet/Dry Mix**: Per-effect parallel processing control

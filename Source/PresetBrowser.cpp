@@ -79,6 +79,20 @@ PresetBrowser::PresetBrowser(const juce::File& root)
     notesEditor.setMultiLine(true);
     addAndMakeVisible(notesEditor);
 
+    // Plugins display section
+    pluginsLabel.setText("Plugins:", juce::dontSendNotification);
+    pluginsLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+    addAndMakeVisible(pluginsLabel);
+
+    pluginsDisplay.setTextToShowWhenEmpty("No preset selected", juce::Colours::grey);
+    pluginsDisplay.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff2a2a2a));
+    pluginsDisplay.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff3a3a3a));
+    pluginsDisplay.setColour(juce::TextEditor::textColourId, juce::Colour(0xffcccccc));
+    pluginsDisplay.setReadOnly(true);
+    pluginsDisplay.setMultiLine(true);
+    pluginsDisplay.setFont(juce::Font(11.0f));
+    addAndMakeVisible(pluginsDisplay);
+
     refresh();
 }
 
@@ -197,9 +211,15 @@ void PresetBrowser::resized()
     buttonArea.removeFromLeft(4);
     newFolderButton.setBounds(buttonArea);
 
-    // Notes area at bottom (above save)
-    auto notesArea = bounds.removeFromBottom(100);
-    auto notesHeader = notesArea.removeFromTop(20);
+    // Plugins area at bottom (above save)
+    auto pluginsArea = bounds.removeFromBottom(60);
+    auto pluginsHeader = pluginsArea.removeFromTop(18);
+    pluginsLabel.setBounds(pluginsHeader.reduced(4, 0));
+    pluginsDisplay.setBounds(pluginsArea.reduced(4, 2));
+
+    // Notes area at bottom (above plugins)
+    auto notesArea = bounds.removeFromBottom(80);
+    auto notesHeader = notesArea.removeFromTop(18);
     notesLabel.setBounds(notesHeader.removeFromLeft(50).reduced(4, 0));
     editNotesButton.setBounds(notesHeader.removeFromRight(40).reduced(2, 0));
     notesEditor.setBounds(notesArea.reduced(4, 2));
@@ -241,6 +261,7 @@ void PresetBrowser::listBoxItemClicked(int row, const juce::MouseEvent&)
         selectedPreset = presetFiles[row];
         presetNameEditor.setText(presetFiles[row].getFileNameWithoutExtension());
         loadNotesForPreset(selectedPreset);
+        loadMetadataForPreset(selectedPreset);
         std::cerr << "[PresetBrowser] Selected preset: " << selectedPreset.getFileName() << std::endl;
     }
 }
@@ -269,6 +290,7 @@ void PresetBrowser::selectedRowsChanged(int lastRowSelected)
         selectedPreset = presetFiles[lastRowSelected];
         presetNameEditor.setText(presetFiles[lastRowSelected].getFileNameWithoutExtension());
         loadNotesForPreset(selectedPreset);
+        loadMetadataForPreset(selectedPreset);
         std::cerr << "[PresetBrowser] Selected preset via row change: " << selectedPreset.getFileName() << std::endl;
     }
 }
@@ -354,13 +376,41 @@ void PresetBrowser::buttonClicked(juce::Button* button)
     }
     else if (button == &saveButton)
     {
-        // Use popup dialog for better keyboard focus handling
-        auto* alertWindow = new juce::AlertWindow("Save Preset", "Enter preset name:", juce::MessageBoxIconType::NoIcon);
-        alertWindow->addTextEditor("name", presetNameEditor.getText(), "Name:");
-        alertWindow->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        // Load existing metadata if a preset is selected
+        juce::String currentName = presetNameEditor.getText();
+        juce::String currentAuthor, currentTags, currentNotes;
+
+        if (selectedPreset.exists())
+        {
+            auto xmlDoc = juce::XmlDocument::parse(selectedPreset);
+            if (xmlDoc != nullptr && xmlDoc->hasTagName("UhbikChainPreset"))
+            {
+                if (currentName.isEmpty())
+                    currentName = selectedPreset.getFileNameWithoutExtension();
+                currentAuthor = xmlDoc->getStringAttribute("author", "");
+                currentTags = xmlDoc->getStringAttribute("tags", "");
+                currentNotes = xmlDoc->getStringAttribute("notes", "");
+            }
+        }
+
+        // Use popup dialog with all metadata fields (pre-populated)
+        auto* alertWindow = new juce::AlertWindow("Save Preset", "", juce::MessageBoxIconType::NoIcon);
+        alertWindow->addTextEditor("name", currentName, "Name:");
+        alertWindow->addTextEditor("author", currentAuthor, "Author:");
+        alertWindow->addTextEditor("tags", currentTags, "Tags (comma separated):");
+        alertWindow->addTextEditor("notes", currentNotes, "Notes:");
+
+        // Make notes field multiline
+        if (auto* te = alertWindow->getTextEditor("notes"))
+        {
+            te->setMultiLine(true);
+            te->setReturnKeyStartsNewLine(true);
+        }
+
+        alertWindow->addButton("Save", 1);
         alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        // Give focus to the text editor
+        // Give focus to the name editor
         if (auto* te = alertWindow->getTextEditor("name"))
             te->grabKeyboardFocus();
 
@@ -370,9 +420,13 @@ void PresetBrowser::buttonClicked(juce::Button* button)
                 if (result == 1)
                 {
                     auto name = alertWindow->getTextEditorContents("name").trim();
+                    auto author = alertWindow->getTextEditorContents("author").trim();
+                    auto tags = alertWindow->getTextEditorContents("tags").trim();
+                    auto notes = alertWindow->getTextEditorContents("notes");
+
                     if (name.isNotEmpty() && listener != nullptr)
                     {
-                        listener->savePresetRequested(currentFolder, name);
+                        listener->savePresetRequested(currentFolder, name, author, tags, notes);
                         presetNameEditor.clear();
                         refresh();
                     }
@@ -431,6 +485,46 @@ void PresetBrowser::loadNotesForPreset(const juce::File& presetFile)
     }
 }
 
+void PresetBrowser::loadMetadataForPreset(const juce::File& presetFile)
+{
+    // Try to parse as XML preset format
+    auto xmlDoc = juce::XmlDocument::parse(presetFile);
+    if (xmlDoc != nullptr && xmlDoc->hasTagName("UhbikChainPreset"))
+    {
+        juce::String plugins = xmlDoc->getStringAttribute("plugins", "");
+        int pluginCount = xmlDoc->getIntAttribute("pluginCount", 0);
+        juce::String author = xmlDoc->getStringAttribute("author", "");
+        juce::String tags = xmlDoc->getStringAttribute("tags", "");
+        juce::String notes = xmlDoc->getStringAttribute("notes", "");
+
+        juce::String displayText;
+        if (pluginCount > 0)
+        {
+            displayText = juce::String(pluginCount) + " effect(s):\n" + plugins.replace(", ", "\n");
+        }
+        else
+        {
+            displayText = "Empty chain";
+        }
+
+        if (author.isNotEmpty())
+            displayText += "\n\nAuthor: " + author;
+        if (tags.isNotEmpty())
+            displayText += "\nTags: " + tags;
+
+        pluginsDisplay.setText(displayText);
+
+        // Show notes from XML (not separate file)
+        notesEditor.setText(notes);
+    }
+    else
+    {
+        // Legacy format - try separate notes file
+        pluginsDisplay.setText("(Legacy preset format)");
+        loadNotesForPreset(presetFile);
+    }
+}
+
 void PresetBrowser::saveNotesForPreset(const juce::File& presetFile)
 {
     auto notesFile = getNotesFile(presetFile);
@@ -448,29 +542,77 @@ void PresetBrowser::saveNotesForPreset(const juce::File& presetFile)
 
 void PresetBrowser::showNotesEditor()
 {
-    auto* alertWindow = new juce::AlertWindow("Edit Notes", "Notes for: " + selectedPreset.getFileNameWithoutExtension(), juce::MessageBoxIconType::NoIcon);
-    alertWindow->addTextEditor("notes", notesEditor.getText(), "");
+    if (!selectedPreset.exists())
+        return;
 
+    // Load current metadata from XML
+    juce::String currentName = selectedPreset.getFileNameWithoutExtension();
+    juce::String currentAuthor, currentTags, currentNotes;
+
+    auto xmlDoc = juce::XmlDocument::parse(selectedPreset);
+    if (xmlDoc != nullptr && xmlDoc->hasTagName("UhbikChainPreset"))
+    {
+        currentAuthor = xmlDoc->getStringAttribute("author", "");
+        currentTags = xmlDoc->getStringAttribute("tags", "");
+        currentNotes = xmlDoc->getStringAttribute("notes", "");
+    }
+
+    auto* alertWindow = new juce::AlertWindow("Edit Preset", "", juce::MessageBoxIconType::NoIcon);
+    alertWindow->addTextEditor("name", currentName, "Name:");
+    alertWindow->addTextEditor("author", currentAuthor, "Author:");
+    alertWindow->addTextEditor("tags", currentTags, "Tags (comma separated):");
+    alertWindow->addTextEditor("notes", currentNotes, "Notes:");
+
+    // Make notes field multiline
     if (auto* te = alertWindow->getTextEditor("notes"))
     {
         te->setMultiLine(true);
         te->setReturnKeyStartsNewLine(true);
-        te->setSize(300, 150);
-        te->grabKeyboardFocus();
     }
 
-    alertWindow->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0));
+    alertWindow->addButton("Save", 1);
     alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
+    // Give focus to the name editor
+    if (auto* te = alertWindow->getTextEditor("name"))
+        te->grabKeyboardFocus();
+
     alertWindow->enterModalState(true, juce::ModalCallbackFunction::create(
-        [this, alertWindow](int result)
+        [this, alertWindow, xmlDoc = std::move(xmlDoc)](int result) mutable
         {
-            if (result == 1)
+            if (result == 1 && xmlDoc != nullptr)
             {
+                auto newName = alertWindow->getTextEditorContents("name").trim();
+                auto author = alertWindow->getTextEditorContents("author").trim();
+                auto tags = alertWindow->getTextEditorContents("tags").trim();
                 auto notes = alertWindow->getTextEditorContents("notes");
+
+                // Update XML attributes
+                xmlDoc->setAttribute("name", newName);
+                xmlDoc->setAttribute("author", author);
+                xmlDoc->setAttribute("tags", tags);
+                xmlDoc->setAttribute("notes", notes);
+
+                // Handle rename if name changed
+                juce::String oldName = selectedPreset.getFileNameWithoutExtension();
+                if (newName != oldName && newName.isNotEmpty())
+                {
+                    auto newFile = selectedPreset.getParentDirectory().getChildFile(newName + ".uhbikchain");
+                    if (xmlDoc->writeTo(newFile))
+                    {
+                        selectedPreset.deleteFile();
+                        selectedPreset = newFile;
+                    }
+                }
+                else
+                {
+                    xmlDoc->writeTo(selectedPreset);
+                }
+
+                // Update displays
                 notesEditor.setText(notes);
-                if (selectedPreset.exists())
-                    saveNotesForPreset(selectedPreset);
+                loadMetadataForPreset(selectedPreset);
+                refresh();
             }
             delete alertWindow;
         }), true);

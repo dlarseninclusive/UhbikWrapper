@@ -29,7 +29,9 @@ public:
 
     // PresetBrowser::Listener
     void presetSelected(const juce::File& presetFile) override;
-    void savePresetRequested(const juce::File& folder, const juce::String& name) override;
+    void savePresetRequested(const juce::File& folder, const juce::String& name,
+                             const juce::String& author, const juce::String& tags,
+                             const juce::String& notes) override;
 
 private:
     void timerCallback() override;

@@ -12,7 +12,9 @@ public:
     public:
         virtual ~Listener() = default;
         virtual void presetSelected(const juce::File& presetFile) = 0;
-        virtual void savePresetRequested(const juce::File& folder, const juce::String& name) = 0;
+        virtual void savePresetRequested(const juce::File& folder, const juce::String& name,
+                                         const juce::String& author, const juce::String& tags,
+                                         const juce::String& notes) = 0;
     };
 
     PresetBrowser(const juce::File& rootFolder);
@@ -40,6 +42,7 @@ private:
     void scanFolder();
     void scanSubfolders(const juce::File& folder, juce::StringArray& folders, const juce::String& prefix);
     void loadNotesForPreset(const juce::File& presetFile);
+    void loadMetadataForPreset(const juce::File& presetFile);
     void saveNotesForPreset(const juce::File& presetFile);
     juce::File getNotesFile(const juce::File& presetFile);
     void showNotesEditor();
@@ -62,6 +65,8 @@ private:
     juce::TextEditor presetNameEditor;
     juce::TextEditor notesEditor;
     juce::Label notesLabel;
+    juce::Label pluginsLabel;
+    juce::TextEditor pluginsDisplay;
 
     Listener* listener = nullptr;
 

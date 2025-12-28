@@ -4,12 +4,47 @@
 #include <thread>
 #include <chrono>
 
+juce::AudioProcessorValueTreeState::ParameterLayout UhbikWrapperAudioProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    // Master controls
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"inputGain", 1}, "Input Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"outputGain", 1}, "Output Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"mix", 1}, "Dry/Wet Mix",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    // 8 Macro knobs
+    for (int i = 0; i < NUM_MACROS; ++i)
+    {
+        juce::String id = "macro" + juce::String(i + 1);
+        juce::String name = "Macro " + juce::String(i + 1);
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{id, 1}, name,
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    }
+
+    return { params.begin(), params.end() };
+}
+
 UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+                     .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), false)  // Sidechain input
                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                       )
+                       ),
+       apvts(*this, nullptr, "Parameters", createParameterLayout())
 #endif
 {
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
@@ -79,15 +114,16 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
             std::cerr << "[RACK] Plugin has " << numInputBuses << " input buses, "
                       << numOutputBuses << " output buses" << std::endl << std::flush;
 
-        // Try to disable sidechain (second input bus) if present
+        // Always enable sidechain on hosted plugins that support it
+        // We'll handle routing in processBlock based on whether wrapper has sidechain connected
         if (numInputBuses > 1)
         {
-            auto* sidechain = plugin->getBus(true, 1);
-            if (sidechain != nullptr)
+            auto* pluginSidechain = plugin->getBus(true, 1);
+            if (pluginSidechain != nullptr)
             {
                 if (debugLogging.load())
-                    std::cerr << "[RACK] Disabling sidechain bus" << std::endl << std::flush;
-                sidechain->enable(false);
+                    std::cerr << "[RACK] Enabling sidechain bus on hosted plugin (always enabled)" << std::endl << std::flush;
+                pluginSidechain->enable(true);
             }
         }
 
@@ -245,6 +281,14 @@ void UhbikWrapperAudioProcessor::changeProgramName (int index, const juce::Strin
 void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const juce::SpinLock::ScopedLockType lock(chainLock);
+
+    auto* wrapperSidechain = getBus(true, 1);
+    bool wrapperHasSidechain = (wrapperSidechain != nullptr && wrapperSidechain->isEnabled());
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] prepareToPlay: SR=" << sampleRate << " BS=" << samplesPerBlock
+                  << " sidechain=" << (wrapperHasSidechain ? "CONNECTED" : "not connected") << std::endl << std::flush;
+
     for (auto& slot : effectChain)
     {
         if (slot.plugin != nullptr)
@@ -269,12 +313,24 @@ void UhbikWrapperAudioProcessor::releaseResources()
 #ifndef JucePlugin_PreferredChannelConfigurations
 bool UhbikWrapperAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
+    // Main output must be mono or stereo
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
      && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 
+    // Main input must match main output
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
+
+    // Sidechain (second input bus) can be disabled, mono, or stereo
+    if (layouts.inputBuses.size() > 1)
+    {
+        auto sidechainLayout = layouts.getChannelSet(true, 1);
+        if (!sidechainLayout.isDisabled()
+            && sidechainLayout != juce::AudioChannelSet::mono()
+            && sidechainLayout != juce::AudioChannelSet::stereo())
+            return false;
+    }
 
     return true;
 }
@@ -294,14 +350,93 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (!lock.isLocked())
         return;
 
+    // Get parameter values
+    float inputGainDb = apvts.getRawParameterValue("inputGain")->load();
+    float outputGainDb = apvts.getRawParameterValue("outputGain")->load();
+    float mixPercent = apvts.getRawParameterValue("mix")->load();
+
+    float inputGain = juce::Decibels::decibelsToGain(inputGainDb);
+    float outputGain = juce::Decibels::decibelsToGain(outputGainDb);
+    float wetMix = mixPercent / 100.0f;
+    float dryMix = 1.0f - wetMix;
+
+    // Check if we have sidechain input (buffer has more than 2 channels)
+    const int numBufferChannels = buffer.getNumChannels();
+    const int mainChannels = 2;  // Stereo main
+    const bool hasSidechainInput = (numBufferChannels > mainChannels);
+    const int numSamples = buffer.getNumSamples();
+
+    // Store dry signal for mix
+    juce::AudioBuffer<float> dryBuffer;
+    if (dryMix > 0.0f)
+    {
+        dryBuffer.setSize(mainChannels, numSamples, false, false, true);
+        for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+            dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+    }
+
+    // Apply input gain to main channels only
+    for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+        buffer.applyGain(ch, 0, numSamples, inputGain);
+
     // Process each effect in the chain
     for (auto& slot : effectChain)
     {
         if (slot.plugin != nullptr && slot.ready.load() && !slot.bypassed)
         {
-            slot.plugin->processBlock(buffer, midiMessages);
+            int pluginInputChannels = slot.plugin->getTotalNumInputChannels();
+
+            if (pluginInputChannels <= mainChannels)
+            {
+                // Plugin doesn't use sidechain - pass main channels only
+                if (numBufferChannels >= mainChannels)
+                {
+                    float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
+                    juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
+                    slot.plugin->processBlock(mainBuffer, midiMessages);
+                }
+            }
+            else if (hasSidechainInput && numBufferChannels >= 4)
+            {
+                // Plugin uses sidechain and we have sidechain input - pass full buffer
+                slot.plugin->processBlock(buffer, midiMessages);
+            }
+            else
+            {
+                // Plugin uses sidechain but wrapper doesn't have sidechain connected
+                // Create a 4-channel buffer with main audio + silent sidechain
+                juce::AudioBuffer<float> pluginBuffer(4, numSamples);
+
+                // Copy main channels
+                pluginBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples);
+                pluginBuffer.copyFrom(1, 0, buffer, 1, 0, numSamples);
+
+                // Clear sidechain channels (silence)
+                pluginBuffer.clear(2, 0, numSamples);
+                pluginBuffer.clear(3, 0, numSamples);
+
+                slot.plugin->processBlock(pluginBuffer, midiMessages);
+
+                // Copy processed main channels back
+                buffer.copyFrom(0, 0, pluginBuffer, 0, 0, numSamples);
+                buffer.copyFrom(1, 0, pluginBuffer, 1, 0, numSamples);
+            }
         }
     }
+
+    // Apply wet/dry mix
+    if (dryMix > 0.0f)
+    {
+        for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+        {
+            buffer.applyGain(ch, 0, numSamples, wetMix);
+            buffer.addFrom(ch, 0, dryBuffer, ch, 0, numSamples, dryMix);
+        }
+    }
+
+    // Apply output gain to main channels
+    for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+        buffer.applyGain(ch, 0, numSamples, outputGain);
 }
 
 bool UhbikWrapperAudioProcessor::hasEditor() const
@@ -320,12 +455,16 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
-    state.setProperty("version", 2, nullptr);  // Version 2 adds UI state
+    state.setProperty("version", 3, nullptr);  // Version 3 adds APVTS
     state.setProperty("chainSize", static_cast<int>(effectChain.size()), nullptr);
 
     // Save UI state
     state.setProperty("debugLogging", debugLogging.load(), nullptr);
     state.setProperty("uiScale", uiScale.load(), nullptr);
+
+    // Save APVTS parameters
+    auto apvtsState = apvts.copyState();
+    state.addChild(apvtsState, -1, nullptr);
 
     for (size_t i = 0; i < effectChain.size(); ++i)
     {
@@ -396,6 +535,15 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
     debugLogging.store(static_cast<bool>(state.getProperty("debugLogging", false)));
     uiScale.store(static_cast<float>(state.getProperty("uiScale", 1.0f)));
 
+    // Restore APVTS parameters
+    auto apvtsChild = state.getChildWithName("Parameters");
+    if (apvtsChild.isValid())
+    {
+        apvts.replaceState(apvtsChild);
+        if (debugLogging.load())
+            std::cerr << "[RACK] APVTS state restored" << std::endl << std::flush;
+    }
+
     int savedChainSize = state.getProperty("chainSize", 0);
     if (debugLogging.load())
         std::cerr << "[RACK] Restoring " << savedChainSize << " plugins" << std::endl << std::flush;
@@ -434,16 +582,16 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
 
         if (plugin != nullptr)
         {
-            // Disable sidechain bus if present (same as addPlugin)
+            // Always enable sidechain on hosted plugins that support it
             int numInputBuses = plugin->getBusCount(true);
             if (numInputBuses > 1)
             {
-                auto* sidechain = plugin->getBus(true, 1);
-                if (sidechain != nullptr)
+                auto* pluginSidechain = plugin->getBus(true, 1);
+                if (pluginSidechain != nullptr)
                 {
                     if (debugLogging.load())
-                        std::cerr << "[RACK] Disabling sidechain bus during restore" << std::endl << std::flush;
-                    sidechain->enable(false);
+                        std::cerr << "[RACK] Enabling sidechain bus during restore (always enabled)" << std::endl << std::flush;
+                    pluginSidechain->enable(true);
                 }
             }
 

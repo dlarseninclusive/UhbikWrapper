@@ -43,8 +43,15 @@ class UhbikWrapperAudioProcessor  : public juce::AudioProcessor,
                                     public juce::ChangeBroadcaster
 {
 public:
+    // Parameter constants
+    static constexpr int NUM_MACROS = 8;
+
     UhbikWrapperAudioProcessor();
     ~UhbikWrapperAudioProcessor() override;
+
+    // Parameter system
+    juce::AudioProcessorValueTreeState apvts;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;

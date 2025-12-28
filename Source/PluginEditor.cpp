@@ -38,11 +38,16 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     populatePluginSelector();
     refreshChainDisplay();
 
-    // Apply saved UI scale
+    // Apply saved UI scale after a short delay (JUCE needs component to be fully ready)
     uiScale = audioProcessor.uiScale.load();
     if (uiScale != 1.0f)
     {
-        setSize(static_cast<int>(700 * uiScale), static_cast<int>(500 * uiScale));
+        juce::Component::SafePointer<UhbikWrapperAudioProcessorEditor> safeThis(this);
+        juce::Timer::callAfterDelay(100, [safeThis, scale = uiScale]()
+        {
+            if (safeThis != nullptr)
+                safeThis->setScaleFactor(scale);
+        });
     }
 
     startTimerHz(2);
@@ -431,25 +436,65 @@ void UhbikWrapperAudioProcessorEditor::presetSelected(const juce::File& presetFi
 {
     std::cerr << "[UI] Loading preset: " << presetFile.getFullPathName() << std::endl << std::flush;
 
-    juce::MemoryBlock stateData;
-    if (presetFile.loadFileAsData(stateData))
+    // Try to load as new XML format first
+    auto xmlDoc = juce::XmlDocument::parse(presetFile);
+    if (xmlDoc != nullptr && xmlDoc->hasTagName("UhbikChainPreset"))
     {
+        // New XML format with metadata
+        juce::String stateBase64 = xmlDoc->getStringAttribute("stateData");
+        juce::MemoryBlock stateData;
+        stateData.fromBase64Encoding(stateBase64);
         audioProcessor.setStateInformation(stateData.getData(), static_cast<int>(stateData.getSize()));
+        std::cerr << "[UI] Loaded XML preset format" << std::endl << std::flush;
+    }
+    else
+    {
+        // Legacy binary format
+        juce::MemoryBlock stateData;
+        if (presetFile.loadFileAsData(stateData))
+        {
+            audioProcessor.setStateInformation(stateData.getData(), static_cast<int>(stateData.getSize()));
+            std::cerr << "[UI] Loaded legacy binary preset format" << std::endl << std::flush;
+        }
     }
 }
 
-void UhbikWrapperAudioProcessorEditor::savePresetRequested(const juce::File& folder, const juce::String& name)
+void UhbikWrapperAudioProcessorEditor::savePresetRequested(const juce::File& folder, const juce::String& name,
+                                                            const juce::String& author, const juce::String& tags,
+                                                            const juce::String& notes)
 {
     auto file = folder.getChildFile(name + ".uhbikchain");
 
     std::cerr << "[UI] Saving preset to: " << file.getFullPathName() << std::endl << std::flush;
 
+    // Create XML preset with metadata
+    juce::XmlElement preset("UhbikChainPreset");
+    preset.setAttribute("version", 1);
+    preset.setAttribute("name", name);
+    preset.setAttribute("author", author);
+    preset.setAttribute("tags", tags);
+    preset.setAttribute("notes", notes);
+
+    // Build plugin list
+    juce::StringArray pluginNames;
+    for (int i = 0; i < audioProcessor.getChainSize(); ++i)
+    {
+        auto* plugin = audioProcessor.getPluginAt(i);
+        if (plugin != nullptr)
+            pluginNames.add(audioProcessor.effectChain[static_cast<size_t>(i)].description.name);
+    }
+    preset.setAttribute("plugins", pluginNames.joinIntoString(", "));
+    preset.setAttribute("pluginCount", audioProcessor.getChainSize());
+
+    // Get state data and encode as base64
     juce::MemoryBlock stateData;
     audioProcessor.getStateInformation(stateData);
+    preset.setAttribute("stateData", stateData.toBase64Encoding());
 
-    if (file.replaceWithData(stateData.getData(), stateData.getSize()))
+    // Save as XML
+    if (preset.writeTo(file))
     {
-        std::cerr << "[UI] Preset saved successfully" << std::endl << std::flush;
+        std::cerr << "[UI] Preset saved successfully (XML format)" << std::endl << std::flush;
         if (presetBrowser != nullptr)
             presetBrowser->refresh();
     }
