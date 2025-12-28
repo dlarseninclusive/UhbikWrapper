@@ -98,6 +98,59 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 *   `CMakeLists.txt`: Build configuration that fetches JUCE automatically
 *   `setup.sh`: Automated dependency installer and builder
 
+## Development
+
+### Branching Strategy
+
+- **`master`** - Stable release branch. Only merge when ready to release.
+- **`new_features`** - Development branch for new features and fixes.
+
+**Workflow:**
+1. Create/checkout `new_features` branch for development
+2. Make changes and test locally
+3. Push to `new_features` - CI builds will run automatically
+4. When ready, merge `new_features` → `master`
+5. Tag for release (see below)
+
+```bash
+# Start new work
+git checkout new_features
+git pull origin new_features
+
+# ... make changes ...
+
+git add .
+git commit -m "Add feature X"
+git push origin new_features
+
+# When ready to release
+git checkout master
+git merge new_features
+git push origin master
+```
+
+### Creating Releases
+
+Releases are automated via GitHub Actions. When you push a version tag, the CI will:
+1. Build for Linux, Windows, and macOS
+2. Create zip files for each platform
+3. Publish a GitHub Release with all downloads
+
+**To create a release:**
+```bash
+git checkout master
+git tag v0.2.0
+git push --tags
+```
+
+The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/releases
+
+### CI/CD
+
+- **On push to any branch**: Builds all platforms, uploads artifacts
+- **On push to `v*` tag**: Builds + creates GitHub Release with zips
+- **Manual trigger**: Available via Actions tab → "Run workflow"
+
 ## Roadmap
 
 ### Completed
