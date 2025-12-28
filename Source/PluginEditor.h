@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <map>
 #include "PluginProcessor.h"
 #include "EffectSlot.h"
 #include "PresetBrowser.h"
@@ -59,7 +60,19 @@ private:
     std::unique_ptr<PresetBrowser> presetBrowser;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
-    std::vector<std::unique_ptr<juce::DocumentWindow>> pluginEditorWindows;
+
+    // Cache editor windows to avoid recreating (workaround for u-he crash)
+    struct EditorWindow : public juce::DocumentWindow
+    {
+        EditorWindow(const juce::String& name)
+            : DocumentWindow(name, juce::Colour(0xff1e1e1e), DocumentWindow::closeButton)
+        {
+            setUsingNativeTitleBar(true);
+            setResizable(false, false);
+        }
+        void closeButtonPressed() override { setVisible(false); }
+    };
+    std::map<juce::AudioPluginInstance*, std::unique_ptr<EditorWindow>> editorWindowCache;
 
     void savePreset();
     void loadPreset();

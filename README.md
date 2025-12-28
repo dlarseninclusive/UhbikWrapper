@@ -200,7 +200,7 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 
 ## Known Issues
 
-- **Editor crash when audio playing (Linux)**: Opening a plugin's editor GUI while audio is playing can crash the plugin. Workaround: Stop playback before clicking Edit. This appears to be related to u-he plugin threading on Linux.
+None currently.
 
 ## License
 

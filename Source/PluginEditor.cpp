@@ -59,7 +59,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     pluginSelector.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
-    pluginEditorWindows.clear();
+    editorWindowCache.clear();
 }
 
 void UhbikWrapperAudioProcessorEditor::timerCallback()
@@ -139,6 +139,29 @@ void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
 void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
 {
     slotComponents.clear();
+
+    // Clean up editor windows for plugins that no longer exist
+    // Just hide them and remove from cache - let natural destruction happen
+    for (auto it = editorWindowCache.begin(); it != editorWindowCache.end(); )
+    {
+        bool found = false;
+        for (int i = 0; i < audioProcessor.getChainSize(); ++i)
+        {
+            if (audioProcessor.getPluginAt(i) == it->first)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            if (it->second != nullptr)
+                it->second->setVisible(false);
+            it = editorWindowCache.erase(it);
+        }
+        else
+            ++it;
+    }
 
     int chainSize = audioProcessor.getChainSize();
     int slotHeight = 60;
@@ -234,41 +257,28 @@ void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
     if (plugin == nullptr || !plugin->hasEditor())
         return;
 
-    // Check if editor already exists
-    auto* existingEditor = plugin->getActiveEditor();
-    if (existingEditor != nullptr)
+    // Check if we already have a cached window for this plugin
+    auto it = editorWindowCache.find(plugin);
+    if (it != editorWindowCache.end() && it->second != nullptr)
     {
-        if (auto* topLevel = existingEditor->getTopLevelComponent())
-            topLevel->toFront(true);
+        // Reuse existing window (just show it - editor is still there)
+        it->second->setVisible(true);
+        it->second->toFront(true);
         return;
     }
 
-    // Use a small delay and async call to ensure clean editor creation
-    juce::Timer::callAfterDelay(50, [this, slotIndex]()
-    {
-        if (slotIndex >= audioProcessor.getChainSize())
-            return;
+    // Create the editor only once per plugin instance
+    auto* editor = plugin->createEditor();
+    if (editor == nullptr)
+        return;
 
-        auto* plug = audioProcessor.getPluginAt(slotIndex);
-        if (plug == nullptr || !plug->hasEditor())
-            return;
+    // Create and cache the window - editor lives as long as the window
+    auto window = std::make_unique<EditorWindow>(plugin->getName());
+    window->setContentOwned(editor, true);
+    window->centreWithSize(editor->getWidth(), editor->getHeight());
+    window->setVisible(true);
 
-        // Double-check no editor appeared in the meantime
-        if (plug->getActiveEditor() != nullptr)
-            return;
-
-        auto* editor = plug->createEditor();
-        if (editor == nullptr)
-            return;
-
-        juce::DialogWindow::LaunchOptions options;
-        options.dialogTitle = plug->getName();
-        options.dialogBackgroundColour = juce::Colour(0xff1e1e1e);
-        options.content.setOwned(editor);
-        options.useNativeTitleBar = true;
-        options.resizable = false;
-        options.launchAsync();
-    });
+    editorWindowCache[plugin] = std::move(window);
 }
 
 void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
