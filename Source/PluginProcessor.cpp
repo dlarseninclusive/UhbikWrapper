@@ -320,8 +320,12 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
-    state.setProperty("version", 1, nullptr);
+    state.setProperty("version", 2, nullptr);  // Version 2 adds UI state
     state.setProperty("chainSize", static_cast<int>(effectChain.size()), nullptr);
+
+    // Save UI state
+    state.setProperty("debugLogging", debugLogging.load(), nullptr);
+    state.setProperty("uiScale", uiScale.load(), nullptr);
 
     for (size_t i = 0; i < effectChain.size(); ++i)
     {
@@ -387,6 +391,10 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             std::cerr << "[RACK] Invalid state format" << std::endl << std::flush;
         return;
     }
+
+    // Restore UI state
+    debugLogging.store(static_cast<bool>(state.getProperty("debugLogging", false)));
+    uiScale.store(static_cast<float>(state.getProperty("uiScale", 1.0f)));
 
     int savedChainSize = state.getProperty("chainSize", 0);
     if (debugLogging.load())

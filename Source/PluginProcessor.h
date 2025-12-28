@@ -97,8 +97,9 @@ public:
     static juce::File getPresetsFolder();
     static void ensurePresetsFolderExists();
 
-    // Debug logging
+    // UI state (saved with plugin state)
     std::atomic<bool> debugLogging{false};
+    std::atomic<float> uiScale{1.0f};
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)

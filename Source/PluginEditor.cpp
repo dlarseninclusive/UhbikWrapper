@@ -46,6 +46,13 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     populatePluginSelector();
     refreshChainDisplay();
 
+    // Apply saved UI scale
+    uiScale = audioProcessor.uiScale.load();
+    if (uiScale != 1.0f)
+    {
+        setSize(static_cast<int>(700 * uiScale), static_cast<int>(500 * uiScale));
+    }
+
     startTimerHz(2);
 }
 
@@ -398,6 +405,7 @@ void UhbikWrapperAudioProcessorEditor::loadPreset()
 void UhbikWrapperAudioProcessorEditor::setUIScale(float scale)
 {
     uiScale = scale;
+    audioProcessor.uiScale.store(scale);  // Save to processor for persistence
     setScaleFactor(scale);
 }
 
