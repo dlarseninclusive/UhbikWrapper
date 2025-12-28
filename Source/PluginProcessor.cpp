@@ -57,7 +57,8 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
 
 void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
 {
-    std::cerr << "[RACK] Adding plugin: " << desc.name << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] Adding plugin: " << desc.name << std::endl << std::flush;
 
     juce::String errorMsg;
     auto plugin = pluginFormatManager.createPluginInstance(
@@ -69,12 +70,14 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
 
     if (plugin != nullptr)
     {
-        std::cerr << "[RACK] Plugin created, configuring buses..." << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Plugin created, configuring buses..." << std::endl << std::flush;
 
         int numInputBuses = plugin->getBusCount(true);
         int numOutputBuses = plugin->getBusCount(false);
-        std::cerr << "[RACK] Plugin has " << numInputBuses << " input buses, "
-                  << numOutputBuses << " output buses" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Plugin has " << numInputBuses << " input buses, "
+                      << numOutputBuses << " output buses" << std::endl << std::flush;
 
         // Try to disable sidechain (second input bus) if present
         if (numInputBuses > 1)
@@ -82,22 +85,26 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
             auto* sidechain = plugin->getBus(true, 1);
             if (sidechain != nullptr)
             {
-                std::cerr << "[RACK] Disabling sidechain bus" << std::endl << std::flush;
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Disabling sidechain bus" << std::endl << std::flush;
                 sidechain->enable(false);
             }
         }
 
         // Log final channel counts
-        std::cerr << "[RACK] Plugin total channels: "
-                  << plugin->getTotalNumInputChannels() << " in, "
-                  << plugin->getTotalNumOutputChannels() << " out" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Plugin total channels: "
+                      << plugin->getTotalNumInputChannels() << " in, "
+                      << plugin->getTotalNumOutputChannels() << " out" << std::endl << std::flush;
 
         double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
         int bs = getBlockSize() > 0 ? getBlockSize() : 512;
 
-        std::cerr << "[RACK] Preparing with SR=" << sr << " BS=" << bs << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Preparing with SR=" << sr << " BS=" << bs << std::endl << std::flush;
         plugin->prepareToPlay(sr, bs);
-        std::cerr << "[RACK] Plugin prepared successfully" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Plugin prepared successfully" << std::endl << std::flush;
 
         EffectSlot slot;
         slot.plugin = std::move(plugin);
@@ -110,22 +117,26 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
             effectChain.push_back(std::move(slot));
         }
 
-        std::cerr << "[RACK] Plugin added to chain. Chain size: " << effectChain.size() << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Plugin added to chain. Chain size: " << effectChain.size() << std::endl << std::flush;
         sendChangeMessage();
     }
     else
     {
-        std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
     }
 }
 
 void UhbikWrapperAudioProcessor::removePlugin(int index)
 {
-    std::cerr << "[RACK] removePlugin called with index: " << index << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] removePlugin called with index: " << index << std::endl << std::flush;
 
     if (index < 0 || index >= static_cast<int>(effectChain.size()))
     {
-        std::cerr << "[RACK] Invalid index for removal: " << index << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Invalid index for removal: " << index << std::endl << std::flush;
         return;
     }
 
@@ -134,7 +145,8 @@ void UhbikWrapperAudioProcessor::removePlugin(int index)
         effectChain.erase(effectChain.begin() + index);
     }
 
-    std::cerr << "[RACK] Plugin removed. Chain size: " << effectChain.size() << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] Plugin removed. Chain size: " << effectChain.size() << std::endl << std::flush;
     sendChangeMessage();
 }
 
@@ -304,7 +316,8 @@ juce::AudioProcessorEditor* UhbikWrapperAudioProcessor::createEditor()
 
 void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
     state.setProperty("version", 1, nullptr);
@@ -322,7 +335,8 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         if (descXml != nullptr)
         {
             slotState.setProperty("description", descXml->toString(), nullptr);
-            std::cerr << "[RACK] Saving slot " << i << ": " << slot.description.name << std::endl << std::flush;
+            if (debugLogging.load())
+                std::cerr << "[RACK] Saving slot " << i << ": " << slot.description.name << std::endl << std::flush;
         }
 
         if (slot.plugin != nullptr)
@@ -330,7 +344,8 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
             juce::MemoryBlock pluginState;
             slot.plugin->getStateInformation(pluginState);
             slotState.setProperty("pluginState", pluginState.toBase64Encoding(), nullptr);
-            std::cerr << "[RACK] Saved plugin state size: " << pluginState.getSize() << std::endl << std::flush;
+            if (debugLogging.load())
+                std::cerr << "[RACK] Saved plugin state size: " << pluginState.getSize() << std::endl << std::flush;
         }
 
         state.addChild(slotState, -1, nullptr);
@@ -340,36 +355,42 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
     if (xml != nullptr)
     {
         copyXmlToBinary(*xml, destData);
-        std::cerr << "[RACK] State saved. Total size: " << destData.getSize() << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] State saved. Total size: " << destData.getSize() << std::endl << std::flush;
     }
 }
 
 void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
 
     if (data == nullptr || sizeInBytes == 0)
     {
-        std::cerr << "[RACK] No state data to restore" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] No state data to restore" << std::endl << std::flush;
         return;
     }
 
     auto xml = getXmlFromBinary(data, sizeInBytes);
     if (xml == nullptr)
     {
-        std::cerr << "[RACK] Failed to parse XML from binary" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Failed to parse XML from binary" << std::endl << std::flush;
         return;
     }
 
     juce::ValueTree state = juce::ValueTree::fromXml(*xml);
     if (!state.isValid() || state.getType().toString() != "EffectChainState")
     {
-        std::cerr << "[RACK] Invalid state format" << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Invalid state format" << std::endl << std::flush;
         return;
     }
 
     int savedChainSize = state.getProperty("chainSize", 0);
-    std::cerr << "[RACK] Restoring " << savedChainSize << " plugins" << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] Restoring " << savedChainSize << " plugins" << std::endl << std::flush;
 
     std::vector<EffectSlot> newChain;
 
@@ -380,13 +401,15 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             continue;
 
         juce::String pluginName = slotState.getProperty("pluginName", "Unknown");
-        std::cerr << "[RACK] Restoring slot " << i << ": " << pluginName << std::endl << std::flush;
+        if (debugLogging.load())
+            std::cerr << "[RACK] Restoring slot " << i << ": " << pluginName << std::endl << std::flush;
 
         juce::String descXmlStr = slotState.getProperty("description").toString();
         auto descElement = juce::XmlDocument::parse(descXmlStr);
         if (descElement == nullptr)
         {
-            std::cerr << "[RACK] Failed to parse plugin description XML" << std::endl << std::flush;
+            if (debugLogging.load())
+                std::cerr << "[RACK] Failed to parse plugin description XML" << std::endl << std::flush;
             continue;
         }
 
@@ -414,7 +437,8 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
                 juce::MemoryBlock pluginStateData;
                 pluginStateData.fromBase64Encoding(pluginStateBase64);
                 plugin->setStateInformation(pluginStateData.getData(), static_cast<int>(pluginStateData.getSize()));
-                std::cerr << "[RACK] Restored plugin state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Restored plugin state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
             }
 
             EffectSlot slot;
@@ -424,11 +448,13 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             slot.ready.store(true);  // Mark as ready after prepareToPlay
 
             newChain.push_back(std::move(slot));
-            std::cerr << "[RACK] Plugin restored successfully" << std::endl << std::flush;
+            if (debugLogging.load())
+                std::cerr << "[RACK] Plugin restored successfully" << std::endl << std::flush;
         }
         else
         {
-            std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
+            if (debugLogging.load())
+                std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
         }
     }
 
@@ -437,7 +463,8 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
         effectChain = std::move(newChain);
     }
 
-    std::cerr << "[RACK] State restored. Chain size: " << effectChain.size() << std::endl << std::flush;
+    if (debugLogging.load())
+        std::cerr << "[RACK] State restored. Chain size: " << effectChain.size() << std::endl << std::flush;
     sendChangeMessage();
 }
 
@@ -454,7 +481,6 @@ void UhbikWrapperAudioProcessor::ensurePresetsFolderExists()
     if (!folder.exists())
     {
         folder.createDirectory();
-        std::cerr << "[RACK] Created presets folder: " << folder.getFullPathName() << std::endl << std::flush;
     }
 }
 

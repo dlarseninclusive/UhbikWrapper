@@ -97,6 +97,9 @@ public:
     static juce::File getPresetsFolder();
     static void ensurePresetsFolderExists();
 
+    // Debug logging
+    std::atomic<bool> debugLogging{false};
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

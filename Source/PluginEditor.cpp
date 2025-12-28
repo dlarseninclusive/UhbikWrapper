@@ -35,6 +35,14 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     viewMenuButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
     addAndMakeVisible(viewMenuButton);
 
+    debugToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::black);
+    debugToggle.setColour(juce::ToggleButton::tickColourId, juce::Colours::black);
+    debugToggle.setToggleState(audioProcessor.debugLogging.load(), juce::dontSendNotification);
+    debugToggle.onClick = [this]() {
+        audioProcessor.debugLogging.store(debugToggle.getToggleState());
+    };
+    addAndMakeVisible(debugToggle);
+
     populatePluginSelector();
     refreshChainDisplay();
 
@@ -307,6 +315,9 @@ void UhbikWrapperAudioProcessorEditor::resized()
 
     // View menu button after title (EFFECT RACK is at browserWidth + 15, ~140px wide)
     viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
+
+    // Debug toggle after View button
+    debugToggle.setBounds(browserWidth + 230, buttonY, 90, 28);
 
     // Footer area
     bounds.removeFromBottom(30);
