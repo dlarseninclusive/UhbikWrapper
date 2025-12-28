@@ -32,24 +32,40 @@ A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U
 *   **Transparent Hosting**: Passes audio directly through the chain with zero added coloration
 *   **Thread-Safe Processing**: Uses SpinLock synchronization for stable audio processing
 
-## Prerequisites (Linux)
+## Building
 
-To build this project, you need the following system libraries:
+### Automated Builds (GitHub Actions)
+Every push to master triggers builds for Linux, Windows, and macOS.
+Download artifacts from the Actions tab on GitHub.
+
+### Manual Build (Any Platform)
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+### Platform-Specific Notes
+
+**Linux** (run `./setup.sh` to install dependencies automatically):
+```bash
+./setup.sh
+```
+The VST3 plugin will be installed at `~/.vst3/Uhbik Wrapper.vst3`
+
+Prerequisites:
 *   **C++ Compiler**: GCC (g++)
 *   **Build Tools**: CMake, pkg-config
 *   **Audio/GUI Libraries**: libfreetype6, libasound2, libx11, libxcomposite, libxcursor, libxinerama, libxext, libxrandr, libglu1-mesa, libgtk-3
 
-## Quick Start / Build
+**Windows**:
+*   Requires Visual Studio 2019+ or Build Tools for Visual Studio
+*   Install to `C:\Program Files\Common Files\VST3\`
 
-The project includes an automated setup script that installs dependencies and compiles the plugin.
-
-1.  Open a terminal in the project directory.
-2.  Run the setup script:
-    ```bash
-    ./setup.sh
-    ```
-3.  Once the build says **"BUILD COMPLETE"**, the VST3 plugin will be installed at:
-    `~/.vst3/Uhbik Wrapper.vst3`
+**macOS**:
+*   Requires Xcode Command Line Tools (`xcode-select --install`)
+*   Builds VST3 and AU formats
+*   Install VST3 to `~/Library/Audio/Plug-Ins/VST3/`
+*   Install AU to `~/Library/Audio/Plug-Ins/Components/`
 
 ## Usage
 
@@ -94,6 +110,7 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 - [x] **Thread-Safe Audio**: SpinLock-based synchronization for stable hosting
 - [x] **Sidechain Passthrough**: Routes DAW sidechain input to hosted plugins
 - [x] **DAW Parameters**: Input/output gain, dry/wet mix, 8 macro knobs exposed via APVTS
+- [x] **Cross-Platform Builds**: GitHub Actions CI for Linux, Windows, macOS
 
 ### Preset Browser (Planned)
 - [ ] **Plugin Availability Filter**: Filter/highlight presets based on installed plugins
@@ -122,7 +139,7 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 - [ ] **Macro Assignment UI**: Right-click to map macros to hosted plugin parameters
 
 ### Platform Support (Planned)
-- [ ] **Cross-Platform**: Windows/macOS VST3 path support
+- [ ] **Code Signing**: macOS notarization and Windows signing for distribution
 
 ## License
 

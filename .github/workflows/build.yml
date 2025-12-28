@@ -1,0 +1,66 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential pkg-config \
+            libasound2-dev libjack-jackd2-dev \
+            libfreetype6-dev libx11-dev libxcomposite-dev \
+            libxcursor-dev libxinerama-dev libxext-dev \
+            libxrandr-dev libglu1-mesa-dev libgtk-3-dev \
+            mesa-common-dev
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload Linux VST3
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-Linux-VST3
+          path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
+
+      - name: Upload Windows VST3
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-Windows-VST3
+          path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
+
+      - name: Upload macOS VST3
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-macOS-VST3
+          path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
+
+      - name: Upload macOS AU
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-macOS-AU
+          path: build/UhbikWrapper_artefacts/Release/AU/*.component

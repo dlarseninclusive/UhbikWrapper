@@ -11,6 +11,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(juce)
 
+# Set plugin formats based on platform
+if(APPLE)
+    set(PLUGIN_FORMATS AU VST3 Standalone)
+else()
+    set(PLUGIN_FORMATS VST3 Standalone)
+endif()
+
 # Create the plugin target
 juce_add_plugin(UhbikWrapper
     COMPANY_NAME "MyCompany"
@@ -22,7 +29,7 @@ juce_add_plugin(UhbikWrapper
     COPY_PLUGIN_AFTER_BUILD TRUE
     PLUGIN_MANUFACTURER_CODE Juce
     PLUGIN_CODE Uhbk
-    FORMATS VST3 Standalone
+    FORMATS ${PLUGIN_FORMATS}
     PRODUCT_NAME "Uhbik Wrapper"
 )
 

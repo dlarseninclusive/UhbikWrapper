@@ -59,31 +59,54 @@ UhbikWrapperAudioProcessor::~UhbikWrapperAudioProcessor()
 
 void UhbikWrapperAudioProcessor::scanForPlugins()
 {
-    juce::File vst3Dir = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile(".vst3");
+    juce::FileSearchPath searchPath;
 
-    if (!vst3Dir.exists())
+#if JUCE_WINDOWS
+    // Windows: C:\Program Files\Common Files\VST3
+    searchPath.add(juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory)
+        .getChildFile("Common Files").getChildFile("VST3"));
+    // Also user's local VST3 folder
+    searchPath.add(juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("VST3"));
+#elif JUCE_MAC
+    // macOS: /Library/Audio/Plug-Ins/VST3 and ~/Library/Audio/Plug-Ins/VST3
+    searchPath.add(juce::File("/Library/Audio/Plug-Ins/VST3"));
+    searchPath.add(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+        .getChildFile("Library/Audio/Plug-Ins/VST3"));
+#else
+    // Linux: ~/.vst3
+    searchPath.add(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+        .getChildFile(".vst3"));
+#endif
+
+    // Scan all paths
+    for (int i = 0; i < searchPath.getNumPaths(); ++i)
     {
-        DBG("VST3 directory not found: " + vst3Dir.getFullPathName());
-        return;
-    }
-
-    DBG("Scanning for plugins in: " + vst3Dir.getFullPathName());
-
-    for (auto* format : pluginFormatManager.getFormats())
-    {
-        juce::PluginDirectoryScanner scanner(
-            knownPluginList,
-            *format,
-            juce::FileSearchPath(vst3Dir.getFullPathName()),
-            true,
-            juce::File(),
-            false
-        );
-
-        juce::String pluginName;
-        while (scanner.scanNextFile(true, pluginName))
+        auto vst3Dir = searchPath[i];
+        if (!vst3Dir.exists())
         {
-            DBG("Found plugin: " + pluginName);
+            DBG("VST3 directory not found: " + vst3Dir.getFullPathName());
+            continue;
+        }
+
+        DBG("Scanning for plugins in: " + vst3Dir.getFullPathName());
+
+        for (auto* format : pluginFormatManager.getFormats())
+        {
+            juce::PluginDirectoryScanner scanner(
+                knownPluginList,
+                *format,
+                juce::FileSearchPath(vst3Dir.getFullPathName()),
+                true,
+                juce::File(),
+                false
+            );
+
+            juce::String pluginName;
+            while (scanner.scanNextFile(true, pluginName))
+            {
+                DBG("Found plugin: " + pluginName);
+            }
         }
     }
 
