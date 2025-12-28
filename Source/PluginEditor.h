@@ -52,7 +52,6 @@ private:
     juce::ComboBox pluginSelector;
     juce::TextButton addButton{"+"};
     juce::TextButton viewMenuButton{"View"};
-    juce::ToggleButton debugToggle{"Debug Log"};
 
     float uiScale = 1.0f;
     std::unique_ptr<PresetBrowser> presetBrowser;

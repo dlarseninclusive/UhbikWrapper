@@ -98,7 +98,7 @@ public:
     static void ensurePresetsFolderExists();
 
     // UI state (saved with plugin state)
-    std::atomic<bool> debugLogging{false};
+    std::atomic<bool> debugLogging{true};  // On by default for debugging
     std::atomic<float> uiScale{1.0f};
 
 private:
