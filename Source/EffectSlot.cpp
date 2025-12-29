@@ -1,11 +1,12 @@
 #include "EffectSlot.h"
 
-EffectSlotComponent::EffectSlotComponent(int index, const juce::String& name, bool bypassed, bool canMoveUp, bool canMoveDown)
+EffectSlotComponent::EffectSlotComponent(int index, const juce::String& name, bool bypassed, bool canMoveUp, bool canMoveDown,
+                                         float inputGainDb, float outputGainDb, float mixPercent)
     : slotIndex(index), pluginName(name), isBypassed(bypassed)
 {
     nameLabel.setText(pluginName, juce::dontSendNotification);
     nameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    nameLabel.setFont(juce::Font(15.0f, juce::Font::bold));
+    nameLabel.setFont(juce::Font(14.0f, juce::Font::bold));
     nameLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(nameLabel);
 
@@ -38,6 +39,57 @@ EffectSlotComponent::EffectSlotComponent(int index, const juce::String& name, bo
     removeButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     removeButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
     addAndMakeVisible(removeButton);
+
+    // Input gain slider
+    inputGainSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    inputGainSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    inputGainSlider.setRange(-24.0, 24.0, 0.1);
+    inputGainSlider.setValue(inputGainDb, juce::dontSendNotification);
+    inputGainSlider.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xff44aa44));
+    inputGainSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff333333));
+    inputGainSlider.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+    inputGainSlider.addListener(this);
+    addAndMakeVisible(inputGainSlider);
+
+    inputGainLabel.setText("In", juce::dontSendNotification);
+    inputGainLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
+    inputGainLabel.setFont(juce::Font(10.0f));
+    inputGainLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(inputGainLabel);
+
+    // Output gain slider
+    outputGainSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    outputGainSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    outputGainSlider.setRange(-24.0, 24.0, 0.1);
+    outputGainSlider.setValue(outputGainDb, juce::dontSendNotification);
+    outputGainSlider.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xffaa4444));
+    outputGainSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff333333));
+    outputGainSlider.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+    outputGainSlider.addListener(this);
+    addAndMakeVisible(outputGainSlider);
+
+    outputGainLabel.setText("Out", juce::dontSendNotification);
+    outputGainLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
+    outputGainLabel.setFont(juce::Font(10.0f));
+    outputGainLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(outputGainLabel);
+
+    // Mix slider
+    mixSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    mixSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    mixSlider.setRange(0.0, 100.0, 1.0);
+    mixSlider.setValue(mixPercent, juce::dontSendNotification);
+    mixSlider.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xff4488cc));
+    mixSlider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff333333));
+    mixSlider.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+    mixSlider.addListener(this);
+    addAndMakeVisible(mixSlider);
+
+    mixLabel.setText("Mix", juce::dontSendNotification);
+    mixLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
+    mixLabel.setFont(juce::Font(10.0f));
+    mixLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(mixLabel);
 }
 
 EffectSlotComponent::~EffectSlotComponent()
@@ -47,6 +99,9 @@ EffectSlotComponent::~EffectSlotComponent()
     editButton.removeListener(this);
     bypassButton.removeListener(this);
     removeButton.removeListener(this);
+    inputGainSlider.removeListener(this);
+    outputGainSlider.removeListener(this);
+    mixSlider.removeListener(this);
 }
 
 void EffectSlotComponent::updateBypassButtonColour()
@@ -90,11 +145,11 @@ void EffectSlotComponent::paint(juce::Graphics& g)
 
 void EffectSlotComponent::resized()
 {
-    auto bounds = getLocalBounds().reduced(8, 6);
+    auto bounds = getLocalBounds().reduced(8, 4);
 
     // Up/down buttons on the left
     auto arrowWidth = 24;
-    auto arrowHeight = 20;
+    auto arrowHeight = 18;
     upButton.setBounds(bounds.getX(), bounds.getY(), arrowWidth, arrowHeight);
     downButton.setBounds(bounds.getX(), bounds.getBottom() - arrowHeight, arrowWidth, arrowHeight);
     bounds.removeFromLeft(arrowWidth + 4);
@@ -102,18 +157,34 @@ void EffectSlotComponent::resized()
     // Status bar space
     bounds.removeFromLeft(10);
 
-    auto buttonWidth = 45;
-    auto buttonHeight = 26;
+    auto buttonWidth = 40;
+    auto buttonHeight = 24;
 
-    // Buttons on the right
-    auto buttonArea = bounds.removeFromRight(buttonWidth * 3 + 12);
-
+    // Buttons on the right (Edit, Bypass, Remove)
+    auto buttonArea = bounds.removeFromRight(buttonWidth * 3 + 8);
     int buttonY = (bounds.getHeight() - buttonHeight) / 2;
-
     editButton.setBounds(buttonArea.getX(), buttonY, buttonWidth, buttonHeight);
-    bypassButton.setBounds(buttonArea.getX() + buttonWidth + 4, buttonY, buttonWidth, buttonHeight);
-    removeButton.setBounds(buttonArea.getX() + buttonWidth * 2 + 8, buttonY, buttonWidth, buttonHeight);
+    bypassButton.setBounds(buttonArea.getX() + buttonWidth + 2, buttonY, buttonWidth, buttonHeight);
+    removeButton.setBounds(buttonArea.getX() + buttonWidth * 2 + 4, buttonY, buttonWidth, buttonHeight);
 
+    // Knobs area (3 knobs with labels)
+    auto knobSize = 36;
+    auto knobSpacing = 4;
+    auto labelHeight = 12;
+    auto knobAreaWidth = knobSize * 3 + knobSpacing * 2;
+    auto knobArea = bounds.removeFromRight(knobAreaWidth + 8);
+    int knobY = (bounds.getHeight() - knobSize - labelHeight) / 2;
+
+    inputGainSlider.setBounds(knobArea.getX(), knobY, knobSize, knobSize);
+    inputGainLabel.setBounds(knobArea.getX(), knobY + knobSize, knobSize, labelHeight);
+
+    outputGainSlider.setBounds(knobArea.getX() + knobSize + knobSpacing, knobY, knobSize, knobSize);
+    outputGainLabel.setBounds(knobArea.getX() + knobSize + knobSpacing, knobY + knobSize, knobSize, labelHeight);
+
+    mixSlider.setBounds(knobArea.getX() + (knobSize + knobSpacing) * 2, knobY, knobSize, knobSize);
+    mixLabel.setBounds(knobArea.getX() + (knobSize + knobSpacing) * 2, knobY + knobSize, knobSize, labelHeight);
+
+    // Plugin name fills the remaining space
     nameLabel.setBounds(bounds.getX(), 0, bounds.getWidth() - 4, getHeight());
 }
 
@@ -161,4 +232,22 @@ void EffectSlotComponent::setPluginName(const juce::String& name)
 {
     pluginName = name;
     nameLabel.setText(pluginName, juce::dontSendNotification);
+}
+
+void EffectSlotComponent::sliderValueChanged(juce::Slider* slider)
+{
+    if (listener == nullptr)
+        return;
+
+    listener->effectSlotMixChanged(slotIndex,
+                                   static_cast<float>(inputGainSlider.getValue()),
+                                   static_cast<float>(outputGainSlider.getValue()),
+                                   static_cast<float>(mixSlider.getValue()));
+}
+
+void EffectSlotComponent::setMixValues(float inputGainDb, float outputGainDb, float mixPercent)
+{
+    inputGainSlider.setValue(inputGainDb, juce::dontSendNotification);
+    outputGainSlider.setValue(outputGainDb, juce::dontSendNotification);
+    mixSlider.setValue(mixPercent, juce::dontSendNotification);
 }

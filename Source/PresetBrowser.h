@@ -15,6 +15,7 @@ public:
         virtual void savePresetRequested(const juce::File& folder, const juce::String& name,
                                          const juce::String& author, const juce::String& tags,
                                          const juce::String& notes) = 0;
+        virtual void initPresetRequested() = 0;
     };
 
     PresetBrowser(const juce::File& rootFolder);
@@ -56,6 +57,7 @@ private:
 
     juce::ComboBox folderSelector;
     juce::ListBox presetList;
+    juce::TextButton initButton{"Init"};
     juce::TextButton loadButton{"Load"};
     juce::TextButton deleteButton{"Del"};
     juce::TextButton saveButton{"Save"};

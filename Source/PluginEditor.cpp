@@ -188,7 +188,10 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
             slot.description.name,
             slot.bypassed,
             canMoveUp,
-            canMoveDown
+            canMoveDown,
+            slot.inputGainDb.load(),
+            slot.outputGainDb.load(),
+            slot.mixPercent.load()
         );
         slotComp->setListener(this);
         slotComp->setBounds(leftPadding, topPadding + i * (slotHeight + slotSpacing),
@@ -246,6 +249,13 @@ void UhbikWrapperAudioProcessorEditor::effectSlotMoveDownClicked(int slotIndex)
             audioProcessor.movePlugin(slotIndex, slotIndex + 1);
         });
     }
+}
+
+void UhbikWrapperAudioProcessorEditor::effectSlotMixChanged(int slotIndex, float inputGainDb, float outputGainDb, float mixPercent)
+{
+    audioProcessor.setSlotInputGain(slotIndex, inputGainDb);
+    audioProcessor.setSlotOutputGain(slotIndex, outputGainDb);
+    audioProcessor.setSlotMix(slotIndex, mixPercent);
 }
 
 void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
@@ -537,4 +547,22 @@ void UhbikWrapperAudioProcessorEditor::savePresetRequested(const juce::File& fol
         if (presetBrowser != nullptr)
             presetBrowser->refresh();
     }
+}
+
+void UhbikWrapperAudioProcessorEditor::initPresetRequested()
+{
+    std::cerr << "[UI] Init/clear chain requested" << std::endl << std::flush;
+
+    // Hide editor windows first (don't destroy - let refreshChainDisplay handle cleanup)
+    for (auto& entry : editorWindowCache)
+    {
+        if (entry.second != nullptr)
+            entry.second->setVisible(false);
+    }
+
+    // Clear the effect chain asynchronously to avoid threading issues
+    // (same pattern as removePlugin)
+    juce::MessageManager::callAsync([this]() {
+        audioProcessor.clearChain();
+    });
 }

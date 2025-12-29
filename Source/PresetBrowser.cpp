@@ -28,6 +28,10 @@ PresetBrowser::PresetBrowser(const juce::File& root)
 
     std::cerr << "[PresetBrowser] ListBox created and configured" << std::endl;
 
+    initButton.addListener(this);
+    initButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff666666));
+    addAndMakeVisible(initButton);
+
     loadButton.addListener(this);
     loadButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
     addAndMakeVisible(loadButton);
@@ -98,6 +102,7 @@ PresetBrowser::PresetBrowser(const juce::File& root)
 
 PresetBrowser::~PresetBrowser()
 {
+    initButton.removeListener(this);
     loadButton.removeListener(this);
     deleteButton.removeListener(this);
     saveButton.removeListener(this);
@@ -196,10 +201,13 @@ void PresetBrowser::resized()
     openFolderButton.setBounds(folderArea.removeFromRight(50).reduced(2, 2));
     folderSelector.setBounds(folderArea.reduced(4, 2));
 
-    // Load/Delete button row
+    // Init/Load/Delete button row
     auto loadArea = bounds.removeFromBottom(32);
     auto loadBounds = loadArea.reduced(4, 2);
-    loadButton.setBounds(loadBounds.removeFromLeft(loadBounds.getWidth() * 2 / 3 - 2));
+    int buttonWidth = loadBounds.getWidth() / 3 - 3;
+    initButton.setBounds(loadBounds.removeFromLeft(buttonWidth));
+    loadBounds.removeFromLeft(4);
+    loadButton.setBounds(loadBounds.removeFromLeft(buttonWidth));
     loadBounds.removeFromLeft(4);
     deleteButton.setBounds(loadBounds);
 
@@ -297,7 +305,20 @@ void PresetBrowser::selectedRowsChanged(int lastRowSelected)
 
 void PresetBrowser::buttonClicked(juce::Button* button)
 {
-    if (button == &loadButton)
+    if (button == &initButton)
+    {
+        if (listener != nullptr)
+        {
+            listener->initPresetRequested();
+            // Clear selection state
+            selectedPreset = juce::File();
+            presetNameEditor.clear();
+            notesEditor.clear();
+            pluginsDisplay.setText("Empty chain");
+            presetList.deselectAllRows();
+        }
+    }
+    else if (button == &loadButton)
     {
         std::cerr << "[PresetBrowser] Load button clicked, selectedPreset: " << selectedPreset.getFullPathName() << std::endl;
         if (selectedPreset.exists() && listener != nullptr)

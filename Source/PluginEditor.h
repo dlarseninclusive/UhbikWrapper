@@ -27,12 +27,14 @@ public:
     void effectSlotRemoveClicked(int slotIndex) override;
     void effectSlotMoveUpClicked(int slotIndex) override;
     void effectSlotMoveDownClicked(int slotIndex) override;
+    void effectSlotMixChanged(int slotIndex, float inputGainDb, float outputGainDb, float mixPercent) override;
 
     // PresetBrowser::Listener
     void presetSelected(const juce::File& presetFile) override;
     void savePresetRequested(const juce::File& folder, const juce::String& name,
                              const juce::String& author, const juce::String& tags,
                              const juce::String& notes) override;
+    void initPresetRequested() override;
 
 private:
     void timerCallback() override;

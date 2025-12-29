@@ -224,12 +224,51 @@ void UhbikWrapperAudioProcessor::movePlugin(int fromIndex, int toIndex)
     }
 }
 
+void UhbikWrapperAudioProcessor::clearChain()
+{
+    if (debugLogging.load())
+        std::cerr << "[RACK] clearChain called. Current size: " << effectChain.size() << std::endl << std::flush;
+
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        effectChain.clear();
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Chain cleared. New size: " << effectChain.size() << std::endl << std::flush;
+    sendChangeMessage();
+}
+
 void UhbikWrapperAudioProcessor::setPluginBypassed(int index, bool bypassed)
 {
     if (index >= 0 && index < static_cast<int>(effectChain.size()))
     {
         effectChain[static_cast<size_t>(index)].bypassed = bypassed;
         sendChangeMessage();
+    }
+}
+
+void UhbikWrapperAudioProcessor::setSlotInputGain(int index, float gainDb)
+{
+    if (index >= 0 && index < static_cast<int>(effectChain.size()))
+    {
+        effectChain[static_cast<size_t>(index)].inputGainDb.store(juce::jlimit(-24.0f, 24.0f, gainDb));
+    }
+}
+
+void UhbikWrapperAudioProcessor::setSlotOutputGain(int index, float gainDb)
+{
+    if (index >= 0 && index < static_cast<int>(effectChain.size()))
+    {
+        effectChain[static_cast<size_t>(index)].outputGainDb.store(juce::jlimit(-24.0f, 24.0f, gainDb));
+    }
+}
+
+void UhbikWrapperAudioProcessor::setSlotMix(int index, float mixPercent)
+{
+    if (index >= 0 && index < static_cast<int>(effectChain.size()))
+    {
+        effectChain[static_cast<size_t>(index)].mixPercent.store(juce::jlimit(0.0f, 100.0f, mixPercent));
     }
 }
 
@@ -404,10 +443,33 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         buffer.applyGain(ch, 0, numSamples, inputGain);
 
     // Process each effect in the chain
+    juce::AudioBuffer<float> slotDryBuffer(mainChannels, numSamples);
+
     for (auto& slot : effectChain)
     {
         if (slot.plugin != nullptr && slot.ready.load() && !slot.bypassed)
         {
+            // Get per-slot mixing parameters
+            float slotInputGain = juce::Decibels::decibelsToGain(slot.inputGainDb.load());
+            float slotOutputGain = juce::Decibels::decibelsToGain(slot.outputGainDb.load());
+            float slotMixPct = slot.mixPercent.load();
+            float slotWet = slotMixPct / 100.0f;
+            float slotDry = 1.0f - slotWet;
+
+            // Save dry signal for per-slot mix (only if mix < 100%)
+            if (slotDry > 0.0f)
+            {
+                for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+                    slotDryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+            }
+
+            // Apply per-slot input gain
+            if (slotInputGain != 1.0f)
+            {
+                for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+                    buffer.applyGain(ch, 0, numSamples, slotInputGain);
+            }
+
             int pluginInputChannels = slot.plugin->getTotalNumInputChannels();
 
             if (pluginInputChannels <= mainChannels)
@@ -444,6 +506,23 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 // Copy processed main channels back
                 buffer.copyFrom(0, 0, pluginBuffer, 0, 0, numSamples);
                 buffer.copyFrom(1, 0, pluginBuffer, 1, 0, numSamples);
+            }
+
+            // Apply per-slot output gain
+            if (slotOutputGain != 1.0f)
+            {
+                for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+                    buffer.applyGain(ch, 0, numSamples, slotOutputGain);
+            }
+
+            // Apply per-slot wet/dry mix
+            if (slotDry > 0.0f)
+            {
+                for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+                {
+                    buffer.applyGain(ch, 0, numSamples, slotWet);
+                    buffer.addFrom(ch, 0, slotDryBuffer, ch, 0, numSamples, slotDry);
+                }
             }
         }
     }
@@ -497,6 +576,11 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         slotState.setProperty("index", static_cast<int>(i), nullptr);
         slotState.setProperty("bypassed", slot.bypassed, nullptr);
         slotState.setProperty("pluginName", slot.description.name, nullptr);
+
+        // Per-slot mixing parameters
+        slotState.setProperty("inputGainDb", slot.inputGainDb.load(), nullptr);
+        slotState.setProperty("outputGainDb", slot.outputGainDb.load(), nullptr);
+        slotState.setProperty("mixPercent", slot.mixPercent.load(), nullptr);
 
         auto descXml = slot.description.createXml();
         if (descXml != nullptr)
@@ -639,6 +723,11 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             slot.description = desc;
             slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
             slot.ready.store(true);  // Mark as ready after prepareToPlay
+
+            // Restore per-slot mixing parameters
+            slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
+            slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
+            slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
 
             newChain.push_back(std::move(slot));
             if (debugLogging.load())

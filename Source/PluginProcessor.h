@@ -10,6 +10,11 @@ struct EffectSlot
     bool bypassed = false;
     std::atomic<bool> ready{false};  // Set true after prepareToPlay completes
 
+    // Per-effect mixing controls
+    std::atomic<float> inputGainDb{0.0f};   // -24 to +24 dB
+    std::atomic<float> outputGainDb{0.0f};  // -24 to +24 dB
+    std::atomic<float> mixPercent{100.0f};  // 0-100% wet
+
     EffectSlot() = default;
     ~EffectSlot() = default;
 
@@ -19,6 +24,9 @@ struct EffectSlot
         , description(std::move(other.description))
         , bypassed(other.bypassed)
         , ready(other.ready.load())
+        , inputGainDb(other.inputGainDb.load())
+        , outputGainDb(other.outputGainDb.load())
+        , mixPercent(other.mixPercent.load())
     {}
 
     // Custom move assignment
@@ -30,6 +38,9 @@ struct EffectSlot
             description = std::move(other.description);
             bypassed = other.bypassed;
             ready.store(other.ready.load());
+            inputGainDb.store(other.inputGainDb.load());
+            outputGainDb.store(other.outputGainDb.load());
+            mixPercent.store(other.mixPercent.load());
         }
         return *this;
     }
@@ -95,7 +106,11 @@ public:
     void addPlugin(const juce::PluginDescription& desc);
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex);
+    void clearChain();
     void setPluginBypassed(int index, bool bypassed);
+    void setSlotInputGain(int index, float gainDb);
+    void setSlotOutputGain(int index, float gainDb);
+    void setSlotMix(int index, float mixPercent);
     juce::AudioPluginInstance* getPluginAt(int index);
     int getChainSize() const { return static_cast<int>(effectChain.size()); }
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
