@@ -27,24 +27,26 @@ else()
 endif()
 
 # Create the plugin target
+# Note: PRODUCT_NAME has no space to avoid Bitwig/macOS compatibility issues
 juce_add_plugin(UhbikWrapper
-    COMPANY_NAME "MyCompany"
+    COMPANY_NAME "Inclusive Audio"
+    BUNDLE_ID "com.inclusiveaudio.uhbikwrapper"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD TRUE
-    PLUGIN_MANUFACTURER_CODE Juce
-    PLUGIN_CODE Uhbk
+    PLUGIN_MANUFACTURER_CODE IncA
+    PLUGIN_CODE UhWr
     FORMATS ${PLUGIN_FORMATS}
-    PRODUCT_NAME "Uhbik Wrapper"
+    PRODUCT_NAME "UhbikWrapper"
 )
 
 # Add CLAP format support via clap-juce-extensions
 clap_juce_extensions_plugin(
     TARGET UhbikWrapper
-    CLAP_ID "com.mycompany.uhbik-wrapper"
+    CLAP_ID "com.inclusiveaudio.uhbikwrapper"
     CLAP_FEATURES audio-effect utility
 )
 

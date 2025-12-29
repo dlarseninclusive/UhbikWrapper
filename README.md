@@ -54,8 +54,8 @@ cmake --build build --config Release
 ./setup.sh
 ```
 Install locations:
-*   VST3: `~/.vst3/Uhbik Wrapper.vst3`
-*   CLAP: `~/.clap/Uhbik Wrapper.clap`
+*   VST3: `~/.vst3/UhbikWrapper.vst3`
+*   CLAP: `~/.clap/UhbikWrapper.clap`
 
 Prerequisites:
 *   **C++ Compiler**: GCC (g++)
@@ -70,9 +70,21 @@ Prerequisites:
 **macOS**:
 *   Requires Xcode Command Line Tools (`xcode-select --install`)
 *   Builds VST3, CLAP, and AU formats
-*   Install VST3 to `~/Library/Audio/Plug-Ins/VST3/`
-*   Install CLAP to `~/Library/Audio/Plug-Ins/CLAP/`
-*   Install AU to `~/Library/Audio/Plug-Ins/Components/`
+*   Install VST3 to `/Library/Audio/Plug-Ins/VST3/`
+*   Install CLAP to `/Library/Audio/Plug-Ins/CLAP/`
+*   Install AU to `/Library/Audio/Plug-Ins/Components/`
+
+**macOS Gatekeeper (important!):** Downloaded plugins are quarantined. Remove the quarantine flag:
+```bash
+# Remove quarantine from all plugins in the folder
+xattr -cr "/Library/Audio/Plug-Ins/VST3"
+xattr -cr "/Library/Audio/Plug-Ins/CLAP"
+
+# Re-sign (ad-hoc) and clear cache
+sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/UhbikWrapper.vst3"
+sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/CLAP/UhbikWrapper.clap"
+```
+Then rescan plugins in your DAW (Bitwig: Settings → Locations → Clear cache → Rescan).
 
 ## Usage
 

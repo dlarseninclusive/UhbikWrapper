@@ -134,8 +134,16 @@ jobs:
             |----------|------|------|-----|
             | Linux | [VST3](UhbikWrapper-Linux-VST3.zip) → `~/.vst3/` | [CLAP](UhbikWrapper-Linux-CLAP.zip) → `~/.clap/` | - |
             | Windows | [VST3](UhbikWrapper-Windows-VST3.zip) → `C:\Program Files\Common Files\VST3\` | [CLAP](UhbikWrapper-Windows-CLAP.zip) → `C:\Program Files\Common Files\CLAP\` | - |
-            | macOS | [VST3](UhbikWrapper-macOS-VST3.zip) → `~/Library/Audio/Plug-Ins/VST3/` | [CLAP](UhbikWrapper-macOS-CLAP.zip) → `~/Library/Audio/Plug-Ins/CLAP/` | [AU](UhbikWrapper-macOS-AU.zip) → `~/Library/Audio/Plug-Ins/Components/` |
+            | macOS | [VST3](UhbikWrapper-macOS-VST3.zip) → `/Library/Audio/Plug-Ins/VST3/` | [CLAP](UhbikWrapper-macOS-CLAP.zip) → `/Library/Audio/Plug-Ins/CLAP/` | [AU](UhbikWrapper-macOS-AU.zip) → `/Library/Audio/Plug-Ins/Components/` |
 
-            > **Note**: macOS builds are unsigned. You may need to right-click → Open or allow in System Settings → Privacy & Security.
+            ### macOS Gatekeeper
+            Downloaded plugins are quarantined. Run in Terminal after installing:
+            ```bash
+            xattr -cr "/Library/Audio/Plug-Ins/VST3"
+            xattr -cr "/Library/Audio/Plug-Ins/CLAP"
+            sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/UhbikWrapper.vst3"
+            sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/CLAP/UhbikWrapper.clap"
+            ```
+            Then rescan plugins in your DAW.
           draft: false
           prerelease: false
