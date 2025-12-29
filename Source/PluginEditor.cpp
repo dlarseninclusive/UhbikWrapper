@@ -13,7 +13,7 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     audioProcessor.addChangeListener(this);
 
     // Preset browser (always visible)
-    presetBrowser = std::make_unique<PresetBrowser>(UhbikWrapperAudioProcessor::getPresetsFolder());
+    presetBrowser = std::make_unique<PresetBrowser>(UhbikWrapperAudioProcessor::getPresetsFolder(), audioProcessor.getKnownPluginList());
     presetBrowser->setListener(this);
     addAndMakeVisible(*presetBrowser);
     presetBrowser->setBounds(0, 0, 200, 500);

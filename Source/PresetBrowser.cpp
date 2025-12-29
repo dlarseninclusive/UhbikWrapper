@@ -1,8 +1,8 @@
 #include "PresetBrowser.h"
 #include <iostream>
 
-PresetBrowser::PresetBrowser(const juce::File& root)
-    : rootFolder(root), currentFolder(root)
+PresetBrowser::PresetBrowser(const juce::File& root, const juce::KnownPluginList& pluginList)
+    : rootFolder(root), currentFolder(root), knownPlugins(pluginList)
 {
     setVisible(true);
     setWantsKeyboardFocus(false);
@@ -172,8 +172,61 @@ void PresetBrowser::scanFolder()
 
     std::cerr << "[PresetBrowser] Total presets found: " << presetFiles.size() << std::endl;
 
+    cachePresetAvailability();
     presetList.updateContent();
     presetList.repaint();
+}
+
+bool PresetBrowser::checkPluginsAvailable(const juce::String& pluginsString)
+{
+    if (pluginsString.isEmpty())
+        return true;
+
+    // Parse comma-separated plugin names
+    juce::StringArray pluginNames;
+    pluginNames.addTokens(pluginsString, ",", "");
+
+    for (auto& name : pluginNames)
+    {
+        name = name.trim();
+        if (name.isEmpty())
+            continue;
+
+        // Check if this plugin exists in known plugins
+        bool found = false;
+        for (const auto& desc : knownPlugins.getTypes())
+        {
+            if (desc.name.containsIgnoreCase(name) || name.containsIgnoreCase(desc.name))
+            {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            std::cerr << "[PresetBrowser] Plugin not found: " << name << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void PresetBrowser::cachePresetAvailability()
+{
+    presetAvailability.clear();
+    presetAvailability.resize(static_cast<size_t>(presetFiles.size()), true);
+
+    for (int i = 0; i < presetFiles.size(); ++i)
+    {
+        auto xml = juce::XmlDocument::parse(presetFiles[i]);
+        if (xml != nullptr)
+        {
+            juce::String plugins = xml->getStringAttribute("plugins", "");
+            presetAvailability[static_cast<size_t>(i)] = checkPluginsAvailable(plugins);
+        }
+    }
 }
 
 void PresetBrowser::paint(juce::Graphics& g)
@@ -249,10 +302,25 @@ void PresetBrowser::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
     if (rowIsSelected)
         g.fillAll(juce::Colour(0xff3a3a3a));
 
-    g.setColour(juce::Colours::white);
+    // Check if all plugins are available for this preset
+    bool available = true;
+    if (static_cast<size_t>(rowNumber) < presetAvailability.size())
+        available = presetAvailability[static_cast<size_t>(rowNumber)];
+
+    // Use orange/dimmed for unavailable presets, white for available
+    if (available)
+        g.setColour(juce::Colours::white);
+    else
+        g.setColour(juce::Colour(0xffaa6633));  // Orange-brown for missing plugins
+
     g.setFont(13.0f);
 
     auto presetName = presetFiles[rowNumber].getFileNameWithoutExtension();
+
+    // Add warning icon for unavailable presets
+    if (!available)
+        presetName = juce::String(juce::CharPointer_UTF8("\xe2\x9a\xa0 ")) + presetName;  // ⚠ warning symbol
+
     g.drawText(presetName, 8, 0, width - 16, height, juce::Justification::centredLeft);
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 
 class PresetBrowser : public juce::Component,
                       public juce::ListBoxModel,
@@ -18,7 +19,7 @@ public:
         virtual void initPresetRequested() = 0;
     };
 
-    PresetBrowser(const juce::File& rootFolder);
+    PresetBrowser(const juce::File& rootFolder, const juce::KnownPluginList& pluginList);
     ~PresetBrowser() override;
 
     void setListener(Listener* l) { listener = l; }
@@ -47,6 +48,8 @@ private:
     void saveNotesForPreset(const juce::File& presetFile);
     juce::File getNotesFile(const juce::File& presetFile);
     void showNotesEditor();
+    bool checkPluginsAvailable(const juce::String& pluginsString);
+    void cachePresetAvailability();
 
     juce::File rootFolder;
     juce::File currentFolder;
@@ -54,6 +57,9 @@ private:
     juce::Array<juce::File> presetFiles;
     juce::StringArray folderNames;
     juce::Array<juce::File> folderPaths;
+    std::vector<bool> presetAvailability;  // True if all plugins available
+
+    const juce::KnownPluginList& knownPlugins;
 
     juce::ComboBox folderSelector;
     juce::ListBox presetList;
