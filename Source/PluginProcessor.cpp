@@ -442,6 +442,18 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
         buffer.applyGain(ch, 0, numSamples, inputGain);
 
+    // Measure master input levels (after input gain)
+    if (numBufferChannels >= 2)
+    {
+        float peakL = buffer.getMagnitude(0, 0, numSamples);
+        float peakR = buffer.getMagnitude(1, 0, numSamples);
+        // Simple peak hold with decay
+        float currentL = masterInputLevelL.load();
+        float currentR = masterInputLevelR.load();
+        masterInputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
+        masterInputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
+    }
+
     // Process each effect in the chain
     juce::AudioBuffer<float> slotDryBuffer(mainChannels, numSamples);
 
@@ -468,6 +480,17 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             {
                 for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
                     buffer.applyGain(ch, 0, numSamples, slotInputGain);
+            }
+
+            // Measure per-slot input levels
+            if (numBufferChannels >= 2)
+            {
+                float peakL = buffer.getMagnitude(0, 0, numSamples);
+                float peakR = buffer.getMagnitude(1, 0, numSamples);
+                float currentL = slot.inputLevelL.load();
+                float currentR = slot.inputLevelR.load();
+                slot.inputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
+                slot.inputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
             }
 
             int pluginInputChannels = slot.plugin->getTotalNumInputChannels();
@@ -524,6 +547,17 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     buffer.addFrom(ch, 0, slotDryBuffer, ch, 0, numSamples, slotDry);
                 }
             }
+
+            // Measure per-slot output levels
+            if (numBufferChannels >= 2)
+            {
+                float peakL = buffer.getMagnitude(0, 0, numSamples);
+                float peakR = buffer.getMagnitude(1, 0, numSamples);
+                float currentL = slot.outputLevelL.load();
+                float currentR = slot.outputLevelR.load();
+                slot.outputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
+                slot.outputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
+            }
         }
     }
 
@@ -540,6 +574,17 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Apply output gain to main channels
     for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
         buffer.applyGain(ch, 0, numSamples, outputGain);
+
+    // Measure master output levels
+    if (numBufferChannels >= 2)
+    {
+        float peakL = buffer.getMagnitude(0, 0, numSamples);
+        float peakR = buffer.getMagnitude(1, 0, numSamples);
+        float currentL = masterOutputLevelL.load();
+        float currentR = masterOutputLevelR.load();
+        masterOutputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
+        masterOutputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
+    }
 }
 
 bool UhbikWrapperAudioProcessor::hasEditor() const

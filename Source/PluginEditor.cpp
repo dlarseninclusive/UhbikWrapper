@@ -50,7 +50,7 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
         });
     }
 
-    startTimerHz(2);
+    startTimerHz(30);  // 30Hz for smooth level metering
 }
 
 UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
@@ -72,6 +72,21 @@ void UhbikWrapperAudioProcessorEditor::timerCallback()
         statusMessage = newStatus;
         repaint();
     }
+
+    // Update level meters for each slot
+    for (size_t i = 0; i < slotComponents.size() && i < static_cast<size_t>(chainSize); ++i)
+    {
+        auto& slot = audioProcessor.effectChain[i];
+        slotComponents[i]->setLevels(
+            slot.inputLevelL.load(),
+            slot.inputLevelR.load(),
+            slot.outputLevelL.load(),
+            slot.outputLevelR.load()
+        );
+    }
+
+    // Repaint footer for master meters
+    repaint(0, getHeight() - 30, getWidth(), 30);
 }
 
 void UhbikWrapperAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -328,9 +343,64 @@ void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRect(browserWidth, getHeight() - 30, getWidth() - browserWidth, 30);
 
+    // Master meters in footer
+    int meterWidth = 60;
+    int meterHeight = 8;
+    int meterY = getHeight() - 20;
+
+    // Input meter label and bar
+    g.setColour(juce::Colours::grey);
+    g.setFont(10.0f);
+    g.drawText("IN", browserWidth + 20, meterY - 2, 20, 12, juce::Justification::centredRight);
+
+    // Input meter background
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(browserWidth + 45, meterY, meterWidth, meterHeight);
+
+    // Input meter levels
+    float inL = audioProcessor.masterInputLevelL.load();
+    float inR = audioProcessor.masterInputLevelR.load();
+    int inLevelWidth = static_cast<int>(juce::jmin(1.0f, (inL + inR) * 0.5f) * meterWidth);
+    if (inLevelWidth > 0)
+    {
+        float avgIn = (inL + inR) * 0.5f;
+        if (avgIn > 0.9f)
+            g.setColour(juce::Colour(0xffff3333));
+        else if (avgIn > 0.7f)
+            g.setColour(juce::Colour(0xffffaa00));
+        else
+            g.setColour(juce::Colour(0xff44cc44));
+        g.fillRect(browserWidth + 45, meterY, inLevelWidth, meterHeight);
+    }
+
+    // Output meter label and bar
+    g.setColour(juce::Colours::grey);
+    g.drawText("OUT", browserWidth + 115, meterY - 2, 25, 12, juce::Justification::centredRight);
+
+    // Output meter background
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(browserWidth + 145, meterY, meterWidth, meterHeight);
+
+    // Output meter levels
+    float outL = audioProcessor.masterOutputLevelL.load();
+    float outR = audioProcessor.masterOutputLevelR.load();
+    int outLevelWidth = static_cast<int>(juce::jmin(1.0f, (outL + outR) * 0.5f) * meterWidth);
+    if (outLevelWidth > 0)
+    {
+        float avgOut = (outL + outR) * 0.5f;
+        if (avgOut > 0.9f)
+            g.setColour(juce::Colour(0xffff3333));
+        else if (avgOut > 0.7f)
+            g.setColour(juce::Colour(0xffffaa00));
+        else
+            g.setColour(juce::Colour(0xff44cc44));
+        g.fillRect(browserWidth + 145, meterY, outLevelWidth, meterHeight);
+    }
+
+    // Status message (shifted right to make room for meters)
     g.setColour(juce::Colours::lightgrey);
     g.setFont(12.0f);
-    g.drawFittedText(statusMessage, browserWidth, getHeight() - 30, getWidth() - browserWidth, 30, juce::Justification::centred, 1);
+    g.drawFittedText(statusMessage, browserWidth + 220, getHeight() - 30, getWidth() - browserWidth - 240, 30, juce::Justification::centred, 1);
 
     // Empty state message
     if (audioProcessor.getChainSize() == 0)

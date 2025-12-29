@@ -15,6 +15,12 @@ struct EffectSlot
     std::atomic<float> outputGainDb{0.0f};  // -24 to +24 dB
     std::atomic<float> mixPercent{100.0f};  // 0-100% wet
 
+    // Level metering (updated by audio thread, read by UI)
+    std::atomic<float> inputLevelL{0.0f};   // 0.0 to 1.0 peak
+    std::atomic<float> inputLevelR{0.0f};
+    std::atomic<float> outputLevelL{0.0f};
+    std::atomic<float> outputLevelR{0.0f};
+
     EffectSlot() = default;
     ~EffectSlot() = default;
 
@@ -27,6 +33,10 @@ struct EffectSlot
         , inputGainDb(other.inputGainDb.load())
         , outputGainDb(other.outputGainDb.load())
         , mixPercent(other.mixPercent.load())
+        , inputLevelL(other.inputLevelL.load())
+        , inputLevelR(other.inputLevelR.load())
+        , outputLevelL(other.outputLevelL.load())
+        , outputLevelR(other.outputLevelR.load())
     {}
 
     // Custom move assignment
@@ -41,6 +51,10 @@ struct EffectSlot
             inputGainDb.store(other.inputGainDb.load());
             outputGainDb.store(other.outputGainDb.load());
             mixPercent.store(other.mixPercent.load());
+            inputLevelL.store(other.inputLevelL.load());
+            inputLevelR.store(other.inputLevelR.load());
+            outputLevelL.store(other.outputLevelL.load());
+            outputLevelR.store(other.outputLevelR.load());
         }
         return *this;
     }
@@ -122,6 +136,12 @@ public:
     // UI state (saved with plugin state)
     std::atomic<bool> debugLogging{true};  // On by default for debugging
     std::atomic<float> uiScale{1.0f};
+
+    // Master level metering (updated by audio thread, read by UI)
+    std::atomic<float> masterInputLevelL{0.0f};
+    std::atomic<float> masterInputLevelR{0.0f};
+    std::atomic<float> masterOutputLevelL{0.0f};
+    std::atomic<float> masterOutputLevelR{0.0f};
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)

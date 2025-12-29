@@ -38,8 +38,14 @@ public:
     void updateBypassButtonColour();
     void setCanMove(bool up, bool down);
     void setMixValues(float inputGainDb, float outputGainDb, float mixPercent);
+    void setLevels(float inL, float inR, float outL, float outR);
 
 private:
+    void drawMeter(juce::Graphics& g, juce::Rectangle<int> bounds, float levelL, float levelR);
+
+    // Level values (updated from timer)
+    float inputLevelL = 0.0f, inputLevelR = 0.0f;
+    float outputLevelL = 0.0f, outputLevelR = 0.0f;
     int slotIndex;
     juce::String pluginName;
     bool isBypassed;

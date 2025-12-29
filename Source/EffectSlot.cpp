@@ -141,6 +141,18 @@ void EffectSlotComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff3a3a3a));
     g.drawEllipse(bounds.getWidth() - 18.0f, 6.0f, 10.0f, 10.0f, 1.0f);
     g.drawEllipse(bounds.getWidth() - 18.0f, bounds.getHeight() - 16.0f, 10.0f, 10.0f, 1.0f);
+
+    // Draw level meters (positioned after arrows, before name)
+    int meterX = 40;  // After arrows and status bar
+    int meterWidth = 14;
+    int meterHeight = bounds.getHeight() - 12;
+    int meterY = 6;
+
+    // Input meter
+    drawMeter(g, juce::Rectangle<int>(meterX, meterY, meterWidth, meterHeight), inputLevelL, inputLevelR);
+
+    // Output meter
+    drawMeter(g, juce::Rectangle<int>(meterX + meterWidth + 4, meterY, meterWidth, meterHeight), outputLevelL, outputLevelR);
 }
 
 void EffectSlotComponent::resized()
@@ -156,6 +168,9 @@ void EffectSlotComponent::resized()
 
     // Status bar space
     bounds.removeFromLeft(10);
+
+    // Space for level meters (2 meters * 14px + gap)
+    bounds.removeFromLeft(36);
 
     auto buttonWidth = 40;
     auto buttonHeight = 24;
@@ -250,4 +265,57 @@ void EffectSlotComponent::setMixValues(float inputGainDb, float outputGainDb, fl
     inputGainSlider.setValue(inputGainDb, juce::dontSendNotification);
     outputGainSlider.setValue(outputGainDb, juce::dontSendNotification);
     mixSlider.setValue(mixPercent, juce::dontSendNotification);
+}
+
+void EffectSlotComponent::setLevels(float inL, float inR, float outL, float outR)
+{
+    inputLevelL = inL;
+    inputLevelR = inR;
+    outputLevelL = outL;
+    outputLevelR = outR;
+    repaint();  // Trigger repaint to update meters
+}
+
+void EffectSlotComponent::drawMeter(juce::Graphics& g, juce::Rectangle<int> bounds, float levelL, float levelR)
+{
+    // Background
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRect(bounds);
+
+    int meterHeight = bounds.getHeight();
+    int meterWidth = bounds.getWidth() / 2 - 1;
+
+    // Left channel
+    auto leftBounds = bounds.removeFromLeft(meterWidth);
+    int levelHeight = static_cast<int>(juce::jmin(1.0f, levelL) * meterHeight);
+
+    // Gradient from green to yellow to red
+    if (levelHeight > 0)
+    {
+        auto meterRect = leftBounds.withTop(leftBounds.getBottom() - levelHeight);
+        if (levelL > 0.9f)
+            g.setColour(juce::Colour(0xffff3333));  // Red for hot
+        else if (levelL > 0.7f)
+            g.setColour(juce::Colour(0xffffaa00));  // Yellow/orange
+        else
+            g.setColour(juce::Colour(0xff44cc44));  // Green
+        g.fillRect(meterRect);
+    }
+
+    // Right channel
+    bounds.removeFromLeft(2);  // Gap
+    auto rightBounds = bounds;
+    levelHeight = static_cast<int>(juce::jmin(1.0f, levelR) * meterHeight);
+
+    if (levelHeight > 0)
+    {
+        auto meterRect = rightBounds.withTop(rightBounds.getBottom() - levelHeight);
+        if (levelR > 0.9f)
+            g.setColour(juce::Colour(0xffff3333));
+        else if (levelR > 0.7f)
+            g.setColour(juce::Colour(0xffffaa00));
+        else
+            g.setColour(juce::Colour(0xff44cc44));
+        g.fillRect(meterRect);
+    }
 }
