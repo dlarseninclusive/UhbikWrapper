@@ -143,6 +143,21 @@ public:
     std::atomic<float> masterOutputLevelL{0.0f};
     std::atomic<float> masterOutputLevelR{0.0f};
 
+    // Ducker parameters (exposed to UI, stored in state)
+    std::atomic<bool> duckerEnabled{false};
+    std::atomic<float> duckerThresholdDb{-20.0f};   // -60 to 0 dB
+    std::atomic<float> duckerAmount{50.0f};          // 0 to 100%
+    std::atomic<float> duckerAttackMs{5.0f};         // 0.1 to 100 ms
+    std::atomic<float> duckerReleaseMs{200.0f};      // 10 to 2000 ms
+    std::atomic<float> duckerHoldMs{0.0f};           // 0 to 500 ms
+
+    // Ducker metering (for UI gain reduction display)
+    std::atomic<float> duckerGainReduction{0.0f};    // 0.0 to 1.0 (amount of reduction)
+
 private:
+    // Ducker envelope state (audio thread only)
+    float duckerEnvelope = 0.0f;
+    float duckerHoldCounter = 0.0f;
+    double currentSampleRate = 44100.0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

@@ -12,6 +12,7 @@ class UhbikWrapperAudioProcessorEditor  : public juce::AudioProcessorEditor,
                                           private juce::ChangeListener,
                                           private juce::ComboBox::Listener,
                                           private juce::Button::Listener,
+                                          private juce::Slider::Listener,
                                           public EffectSlotComponent::Listener,
                                           public PresetBrowser::Listener
 {
@@ -41,6 +42,7 @@ private:
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
     void comboBoxChanged(juce::ComboBox* comboBox) override;
     void buttonClicked(juce::Button* button) override;
+    void sliderValueChanged(juce::Slider* slider) override;
 
     void populatePluginSelector();
     void refreshChainDisplay();
@@ -80,6 +82,22 @@ private:
     void loadPreset();
     void setUIScale(float scale);
     void showViewMenu();
+    void updateDuckerUI();
+
+    // Ducker panel (collapsible)
+    bool duckerExpanded = false;
+    juce::TextButton duckerToggleButton{"DUCKER"};
+    juce::ToggleButton duckerEnableButton{"ON"};
+    juce::Slider duckerThresholdSlider;
+    juce::Slider duckerAmountSlider;
+    juce::Slider duckerAttackSlider;
+    juce::Slider duckerReleaseSlider;
+    juce::Slider duckerHoldSlider;
+    juce::Label duckerThresholdLabel{"", "Thresh"};
+    juce::Label duckerAmountLabel{"", "Amount"};
+    juce::Label duckerAttackLabel{"", "Attack"};
+    juce::Label duckerReleaseLabel{"", "Release"};
+    juce::Label duckerHoldLabel{"", "Hold"};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessorEditor)
 };

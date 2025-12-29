@@ -38,6 +38,82 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     populatePluginSelector();
     refreshChainDisplay();
 
+    // Ducker panel setup
+    duckerToggleButton.addListener(this);
+    duckerToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
+    addAndMakeVisible(duckerToggleButton);
+
+    duckerEnableButton.addListener(this);
+    duckerEnableButton.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xff44aa44));
+    addChildComponent(duckerEnableButton);  // Hidden until expanded
+
+    // Threshold slider (-60 to 0 dB)
+    duckerThresholdSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    duckerThresholdSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
+    duckerThresholdSlider.setRange(-60.0, 0.0, 0.5);
+    duckerThresholdSlider.setValue(audioProcessor.duckerThresholdDb.load());
+    duckerThresholdSlider.setTextValueSuffix(" dB");
+    duckerThresholdSlider.addListener(this);
+    addChildComponent(duckerThresholdSlider);
+    duckerThresholdLabel.setJustificationType(juce::Justification::centred);
+    duckerThresholdLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    duckerThresholdLabel.setFont(juce::Font(12.0f));
+    addChildComponent(duckerThresholdLabel);
+
+    // Amount slider (0 to 100%)
+    duckerAmountSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    duckerAmountSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
+    duckerAmountSlider.setRange(0.0, 100.0, 1.0);
+    duckerAmountSlider.setValue(audioProcessor.duckerAmount.load());
+    duckerAmountSlider.setTextValueSuffix("%");
+    duckerAmountSlider.addListener(this);
+    addChildComponent(duckerAmountSlider);
+    duckerAmountLabel.setJustificationType(juce::Justification::centred);
+    duckerAmountLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    duckerAmountLabel.setFont(juce::Font(12.0f));
+    addChildComponent(duckerAmountLabel);
+
+    // Attack slider (0.1 to 100 ms)
+    duckerAttackSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    duckerAttackSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
+    duckerAttackSlider.setRange(0.1, 100.0, 0.1);
+    duckerAttackSlider.setSkewFactorFromMidPoint(10.0);
+    duckerAttackSlider.setValue(audioProcessor.duckerAttackMs.load());
+    duckerAttackSlider.setTextValueSuffix(" ms");
+    duckerAttackSlider.addListener(this);
+    addChildComponent(duckerAttackSlider);
+    duckerAttackLabel.setJustificationType(juce::Justification::centred);
+    duckerAttackLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    duckerAttackLabel.setFont(juce::Font(12.0f));
+    addChildComponent(duckerAttackLabel);
+
+    // Release slider (10 to 2000 ms)
+    duckerReleaseSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    duckerReleaseSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
+    duckerReleaseSlider.setRange(10.0, 2000.0, 1.0);
+    duckerReleaseSlider.setSkewFactorFromMidPoint(200.0);
+    duckerReleaseSlider.setValue(audioProcessor.duckerReleaseMs.load());
+    duckerReleaseSlider.setTextValueSuffix(" ms");
+    duckerReleaseSlider.addListener(this);
+    addChildComponent(duckerReleaseSlider);
+    duckerReleaseLabel.setJustificationType(juce::Justification::centred);
+    duckerReleaseLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    duckerReleaseLabel.setFont(juce::Font(12.0f));
+    addChildComponent(duckerReleaseLabel);
+
+    // Hold slider (0 to 500 ms)
+    duckerHoldSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    duckerHoldSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
+    duckerHoldSlider.setRange(0.0, 500.0, 1.0);
+    duckerHoldSlider.setValue(audioProcessor.duckerHoldMs.load());
+    duckerHoldSlider.setTextValueSuffix(" ms");
+    duckerHoldSlider.addListener(this);
+    addChildComponent(duckerHoldSlider);
+    duckerHoldLabel.setJustificationType(juce::Justification::centred);
+    duckerHoldLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    duckerHoldLabel.setFont(juce::Font(12.0f));
+    addChildComponent(duckerHoldLabel);
+
     // Apply saved UI scale after a short delay (JUCE needs component to be fully ready)
     uiScale = audioProcessor.uiScale.load();
     if (uiScale != 1.0f)
@@ -59,6 +135,13 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     pluginSelector.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
+    duckerToggleButton.removeListener(this);
+    duckerEnableButton.removeListener(this);
+    duckerThresholdSlider.removeListener(this);
+    duckerAmountSlider.removeListener(this);
+    duckerAttackSlider.removeListener(this);
+    duckerReleaseSlider.removeListener(this);
+    duckerHoldSlider.removeListener(this);
     editorWindowCache.clear();
 }
 
@@ -85,8 +168,20 @@ void UhbikWrapperAudioProcessorEditor::timerCallback()
         );
     }
 
-    // Repaint footer for master meters
+    // Repaint footer for master meters and ducker GR meter
     repaint(0, getHeight() - 30, getWidth(), 30);
+
+    // Repaint ducker header area if expanded (for GR meter in header bar)
+    if (duckerExpanded)
+    {
+        int browserWidth = 200;
+        int duckerHeaderHeight = 25;
+        int duckerExpandedHeight = 100;
+        int duckerHeight = duckerHeaderHeight + duckerExpandedHeight;
+        int duckerY = getHeight() - 30 - duckerHeight;
+        // Repaint the header bar where the GR meter is
+        repaint(browserWidth, duckerY, getWidth() - browserWidth, duckerHeaderHeight);
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -123,6 +218,50 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         showViewMenu();
     }
+    else if (button == &duckerToggleButton)
+    {
+        duckerExpanded = !duckerExpanded;
+        updateDuckerUI();
+        resized();
+    }
+    else if (button == &duckerEnableButton)
+    {
+        audioProcessor.duckerEnabled.store(duckerEnableButton.getToggleState());
+    }
+}
+
+void UhbikWrapperAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
+{
+    if (slider == &duckerThresholdSlider)
+        audioProcessor.duckerThresholdDb.store(static_cast<float>(slider->getValue()));
+    else if (slider == &duckerAmountSlider)
+        audioProcessor.duckerAmount.store(static_cast<float>(slider->getValue()));
+    else if (slider == &duckerAttackSlider)
+        audioProcessor.duckerAttackMs.store(static_cast<float>(slider->getValue()));
+    else if (slider == &duckerReleaseSlider)
+        audioProcessor.duckerReleaseMs.store(static_cast<float>(slider->getValue()));
+    else if (slider == &duckerHoldSlider)
+        audioProcessor.duckerHoldMs.store(static_cast<float>(slider->getValue()));
+}
+
+void UhbikWrapperAudioProcessorEditor::updateDuckerUI()
+{
+    duckerEnableButton.setVisible(duckerExpanded);
+    duckerEnableButton.setToggleState(audioProcessor.duckerEnabled.load(), juce::dontSendNotification);
+
+    duckerThresholdSlider.setVisible(duckerExpanded);
+    duckerThresholdLabel.setVisible(duckerExpanded);
+    duckerAmountSlider.setVisible(duckerExpanded);
+    duckerAmountLabel.setVisible(duckerExpanded);
+    duckerAttackSlider.setVisible(duckerExpanded);
+    duckerAttackLabel.setVisible(duckerExpanded);
+    duckerReleaseSlider.setVisible(duckerExpanded);
+    duckerReleaseLabel.setVisible(duckerExpanded);
+    duckerHoldSlider.setVisible(duckerExpanded);
+    duckerHoldLabel.setVisible(duckerExpanded);
+
+    // Update toggle button text
+    duckerToggleButton.setButtonText(duckerExpanded ? "DUCKER v" : "DUCKER >");
 }
 
 void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
@@ -339,6 +478,64 @@ void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
         g.fillEllipse(static_cast<float>(getWidth() - 11), static_cast<float>(y), 7.0f, 7.0f);
     }
 
+    // Ducker panel background (when expanded)
+    int duckerHeaderHeight = 25;
+    int duckerExpandedHeight = 100;
+    int duckerHeight = duckerHeaderHeight + (duckerExpanded ? duckerExpandedHeight : 0);
+    int duckerY = getHeight() - 30 - duckerHeight;
+
+    // Ducker header bar
+    g.setColour(juce::Colour(0xff333333));
+    g.fillRect(browserWidth, duckerY, getWidth() - browserWidth, duckerHeaderHeight);
+
+    if (duckerExpanded)
+    {
+        // Ducker panel background
+        g.setColour(juce::Colour(0xff252525));
+        g.fillRect(browserWidth, duckerY + duckerHeaderHeight, getWidth() - browserWidth, duckerExpandedHeight);
+    }
+
+    // GR meter in header bar (visible when expanded, to the right of toggle button)
+    if (duckerExpanded)
+    {
+        int grMeterX = browserWidth + 100;  // After the DUCKER toggle button
+        int grMeterY = duckerY + 5;         // In the header bar
+        int grMeterWidth = 120;
+        int grMeterHeight = 14;
+
+        // GR label
+        g.setColour(juce::Colours::white);
+        g.setFont(10.0f);
+        g.drawText("GR", grMeterX - 22, grMeterY, 20, grMeterHeight, juce::Justification::centredRight);
+
+        // GR meter background with border
+        g.setColour(juce::Colour(0xff0a0a0a));
+        g.fillRect(grMeterX, grMeterY, grMeterWidth, grMeterHeight);
+        g.setColour(juce::Colour(0xff444444));
+        g.drawRect(grMeterX, grMeterY, grMeterWidth, grMeterHeight);
+
+        // GR meter bar (orange, fills from left to right based on reduction)
+        float gr = audioProcessor.duckerGainReduction.load();
+        int grWidth = static_cast<int>(gr * (grMeterWidth - 2));
+        if (grWidth > 0)
+        {
+            // Color based on amount of reduction
+            if (gr > 0.7f)
+                g.setColour(juce::Colour(0xffff3333));
+            else if (gr > 0.4f)
+                g.setColour(juce::Colour(0xffff6600));
+            else
+                g.setColour(juce::Colour(0xffffaa00));
+            g.fillRect(grMeterX + 1, grMeterY + 1, grWidth, grMeterHeight - 2);
+        }
+
+        // GR value text to the right of meter
+        float grDb = (gr > 0.001f) ? juce::Decibels::gainToDecibels(1.0f - gr) : 0.0f;
+        g.setColour(juce::Colours::lightgrey);
+        g.setFont(10.0f);
+        g.drawText(juce::String(grDb, 1) + " dB", grMeterX + grMeterWidth + 5, grMeterY, 50, grMeterHeight, juce::Justification::centredLeft);
+    }
+
     // Footer bar (after preset browser)
     g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRect(browserWidth, getHeight() - 30, getWidth() - browserWidth, 30);
@@ -441,6 +638,48 @@ void UhbikWrapperAudioProcessorEditor::resized()
 
     // Footer area
     bounds.removeFromBottom(30);
+
+    // Ducker panel (collapsible, above footer)
+    int duckerHeaderHeight = 25;
+    int duckerExpandedHeight = 100;
+    int duckerHeight = duckerHeaderHeight + (duckerExpanded ? duckerExpandedHeight : 0);
+
+    auto duckerBounds = bounds.removeFromBottom(duckerHeight);
+
+    // Ducker toggle button (always visible)
+    duckerToggleButton.setBounds(duckerBounds.getX() + 10, duckerBounds.getY(), 80, duckerHeaderHeight);
+
+    if (duckerExpanded)
+    {
+        int controlY = duckerBounds.getY() + duckerHeaderHeight + 2;
+        int knobSize = 50;
+        int labelHeight = 16;
+        int spacing = 75;
+        int startX = duckerBounds.getX() + 110;
+
+        // Enable button
+        duckerEnableButton.setBounds(startX - 60, controlY + 18, 50, 25);
+
+        // Threshold - label above knob
+        duckerThresholdLabel.setBounds(startX, controlY, knobSize, labelHeight);
+        duckerThresholdSlider.setBounds(startX, controlY + labelHeight, knobSize, knobSize);
+
+        // Amount
+        duckerAmountLabel.setBounds(startX + spacing, controlY, knobSize, labelHeight);
+        duckerAmountSlider.setBounds(startX + spacing, controlY + labelHeight, knobSize, knobSize);
+
+        // Attack
+        duckerAttackLabel.setBounds(startX + spacing * 2, controlY, knobSize, labelHeight);
+        duckerAttackSlider.setBounds(startX + spacing * 2, controlY + labelHeight, knobSize, knobSize);
+
+        // Release
+        duckerReleaseLabel.setBounds(startX + spacing * 3, controlY, knobSize, labelHeight);
+        duckerReleaseSlider.setBounds(startX + spacing * 3, controlY + labelHeight, knobSize, knobSize);
+
+        // Hold
+        duckerHoldLabel.setBounds(startX + spacing * 4, controlY, knobSize, labelHeight);
+        duckerHoldSlider.setBounds(startX + spacing * 4, controlY + labelHeight, knobSize, knobSize);
+    }
 
     // Rack rails
     bounds.removeFromLeft(15);

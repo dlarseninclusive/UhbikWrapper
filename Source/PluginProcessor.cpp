@@ -345,6 +345,10 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
 {
     const juce::SpinLock::ScopedLockType lock(chainLock);
 
+    currentSampleRate = sampleRate;
+    duckerEnvelope = 0.0f;
+    duckerHoldCounter = 0.0f;
+
     auto* wrapperSidechain = getBus(true, 1);
     bool wrapperHasSidechain = (wrapperSidechain != nullptr && wrapperSidechain->isEnabled());
 
@@ -571,6 +575,74 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // === DUCKER PROCESSING ===
+    if (duckerEnabled.load() && hasSidechainInput)
+    {
+        // Get ducker parameters
+        float thresholdDb = duckerThresholdDb.load();
+        float amount = duckerAmount.load() / 100.0f;  // Convert to 0-1
+        float attackMs = duckerAttackMs.load();
+        float releaseMs = duckerReleaseMs.load();
+        float holdMs = duckerHoldMs.load();
+
+        // Calculate envelope coefficients
+        float attackCoef = std::exp(-1.0f / (static_cast<float>(currentSampleRate) * attackMs * 0.001f));
+        float releaseCoef = std::exp(-1.0f / (static_cast<float>(currentSampleRate) * releaseMs * 0.001f));
+        float holdSamples = static_cast<float>(currentSampleRate) * holdMs * 0.001f;
+
+        // Convert threshold to linear
+        float thresholdLin = juce::Decibels::decibelsToGain(thresholdDb);
+
+        // Process sample-by-sample for accurate envelope
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            // Get sidechain level (channels 2 and 3)
+            float scLeft = (numBufferChannels > 2) ? std::abs(buffer.getSample(2, sample)) : 0.0f;
+            float scRight = (numBufferChannels > 3) ? std::abs(buffer.getSample(3, sample)) : scLeft;
+            float scLevel = std::max(scLeft, scRight);
+
+            // Envelope follower with hold
+            float targetEnv = (scLevel > thresholdLin) ? 1.0f : 0.0f;
+
+            if (targetEnv > duckerEnvelope)
+            {
+                // Attack - sidechain is above threshold
+                duckerEnvelope = attackCoef * duckerEnvelope + (1.0f - attackCoef) * targetEnv;
+                duckerHoldCounter = holdSamples;  // Reset hold counter
+            }
+            else if (duckerHoldCounter > 0.0f)
+            {
+                // Hold phase - maintain current envelope
+                duckerHoldCounter -= 1.0f;
+            }
+            else
+            {
+                // Release - sidechain is below threshold and hold expired
+                duckerEnvelope = releaseCoef * duckerEnvelope + (1.0f - releaseCoef) * targetEnv;
+            }
+
+            // Calculate gain reduction (1.0 = no reduction, 0.0 = full reduction)
+            float gainReduction = 1.0f - (duckerEnvelope * amount);
+
+            // Apply gain reduction to main channels
+            buffer.setSample(0, sample, buffer.getSample(0, sample) * gainReduction);
+            if (mainChannels > 1)
+                buffer.setSample(1, sample, buffer.getSample(1, sample) * gainReduction);
+        }
+
+        // Store gain reduction for UI metering (convert to dB-friendly value)
+        duckerGainReduction.store(duckerEnvelope * amount);
+    }
+    else
+    {
+        // Ducker disabled or no sidechain - decay the meter
+        float currentGR = duckerGainReduction.load();
+        if (currentGR > 0.001f)
+            duckerGainReduction.store(currentGR * 0.95f);
+        else
+            duckerGainReduction.store(0.0f);
+    }
+
     // Apply output gain to main channels
     for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
         buffer.applyGain(ch, 0, numSamples, outputGain);
@@ -603,12 +675,20 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
-    state.setProperty("version", 3, nullptr);  // Version 3 adds APVTS
+    state.setProperty("version", 4, nullptr);  // Version 4 adds ducker
     state.setProperty("chainSize", static_cast<int>(effectChain.size()), nullptr);
 
     // Save UI state
     state.setProperty("debugLogging", debugLogging.load(), nullptr);
     state.setProperty("uiScale", uiScale.load(), nullptr);
+
+    // Save ducker state
+    state.setProperty("duckerEnabled", duckerEnabled.load(), nullptr);
+    state.setProperty("duckerThresholdDb", duckerThresholdDb.load(), nullptr);
+    state.setProperty("duckerAmount", duckerAmount.load(), nullptr);
+    state.setProperty("duckerAttackMs", duckerAttackMs.load(), nullptr);
+    state.setProperty("duckerReleaseMs", duckerReleaseMs.load(), nullptr);
+    state.setProperty("duckerHoldMs", duckerHoldMs.load(), nullptr);
 
     // Save APVTS parameters
     auto apvtsState = apvts.copyState();
@@ -687,6 +767,14 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
     // Restore UI state
     debugLogging.store(static_cast<bool>(state.getProperty("debugLogging", false)));
     uiScale.store(static_cast<float>(state.getProperty("uiScale", 1.0f)));
+
+    // Restore ducker state
+    duckerEnabled.store(static_cast<bool>(state.getProperty("duckerEnabled", false)));
+    duckerThresholdDb.store(static_cast<float>(state.getProperty("duckerThresholdDb", -20.0f)));
+    duckerAmount.store(static_cast<float>(state.getProperty("duckerAmount", 50.0f)));
+    duckerAttackMs.store(static_cast<float>(state.getProperty("duckerAttackMs", 5.0f)));
+    duckerReleaseMs.store(static_cast<float>(state.getProperty("duckerReleaseMs", 200.0f)));
+    duckerHoldMs.store(static_cast<float>(state.getProperty("duckerHoldMs", 0.0f)));
 
     // Restore APVTS parameters
     auto apvtsChild = state.getChildWithName("Parameters");

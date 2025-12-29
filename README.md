@@ -165,27 +165,19 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [x] **Sidechain Passthrough**: Routes DAW sidechain input to hosted plugins
 - [x] **DAW Parameters**: Input/output gain, dry/wet mix, 8 macro knobs exposed via APVTS
 - [x] **Cross-Platform Builds**: GitHub Actions CI for Linux, Windows, macOS
+- [x] **Plugin Availability Filter**: Highlight presets with missing plugins (orange + warning icon)
+- [x] **Per-Effect Mixing**: Input/output gain and wet/dry mix per effect slot
+- [x] **Level Meters**: Per-effect input/output meters and master meters in footer
+- [x] **Built-in Ducker**: Sidechain-triggered volume ducking with threshold, amount, attack, release, hold
 
-### Preset Browser (Planned)
-- [ ] **Plugin Availability Filter**: Filter/highlight presets based on installed plugins
-
-### Sidechain Features (Planned)
-- [ ] **Built-in Ducker**: Sidechain-triggered volume ducking independent of hosted plugins
-- [ ] **Duck Amount**: Control how much the input is attenuated when sidechain is active
-- [ ] **Attack/Release**: Envelope controls for ducking response
-- [ ] **Threshold**: Set the sidechain level that triggers ducking
+### Ducker (Planned)
+- [ ] **Ducker Presets**: Save/load ducker settings independently from effect chain
 
 ### DAW Integration (Planned)
 - [ ] **Macro Parameter Mapping**: Map macro knobs to hosted plugin parameters
-- [ ] **Per-Slot Parameters**: Bypass, wet/dry, gain per effect slot exposed to DAW
-
-### Mixing Controls (Planned)
-- [ ] **Wet/Dry Mix**: Per-effect parallel processing control
-- [ ] **Input/Output Gain**: Per-effect gain staging
+- [ ] **Per-Slot DAW Parameters**: Expose bypass, wet/dry, gain per slot to DAW automation
 
 ### Visualizations (Planned)
-- [ ] **Level Meters**: Per-effect input/output meters with peak hold
-- [ ] **Master Meters**: Input/output meters in footer
 - [ ] **Spectrum Analyzer**: Popup FFT display per effect and master output
 
 ### MIDI (Planned)

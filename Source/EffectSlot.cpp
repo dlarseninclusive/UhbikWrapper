@@ -143,15 +143,19 @@ void EffectSlotComponent::paint(juce::Graphics& g)
     g.drawEllipse(bounds.getWidth() - 18.0f, bounds.getHeight() - 16.0f, 10.0f, 10.0f, 1.0f);
 
     // Draw level meters (positioned after arrows, before name)
-    int meterX = 40;  // After arrows and status bar
-    int meterWidth = 14;
-    int meterHeight = bounds.getHeight() - 12;
-    int meterY = 6;
+    int meterX = 45;  // After arrows and status bar
+    int meterWidth = 12;
+    int meterHeight = bounds.getHeight() - 20;
+    int meterY = 4;
 
-    // Input meter
+    // Input meter with label
+    g.setColour(juce::Colour(0xff888888));
+    g.setFont(8.0f);
+    g.drawText("I", meterX, meterY + meterHeight + 2, meterWidth, 10, juce::Justification::centred);
     drawMeter(g, juce::Rectangle<int>(meterX, meterY, meterWidth, meterHeight), inputLevelL, inputLevelR);
 
-    // Output meter
+    // Output meter with label
+    g.drawText("O", meterX + meterWidth + 4, meterY + meterHeight + 2, meterWidth, 10, juce::Justification::centred);
     drawMeter(g, juce::Rectangle<int>(meterX + meterWidth + 4, meterY, meterWidth, meterHeight), outputLevelL, outputLevelR);
 }
 
@@ -289,21 +293,20 @@ void EffectSlotComponent::drawMeter(juce::Graphics& g, juce::Rectangle<int> boun
     auto leftBounds = bounds.removeFromLeft(meterWidth);
     int levelHeight = static_cast<int>(juce::jmin(1.0f, levelL) * meterHeight);
 
-    // Gradient from green to yellow to red
     if (levelHeight > 0)
     {
         auto meterRect = leftBounds.withTop(leftBounds.getBottom() - levelHeight);
         if (levelL > 0.9f)
-            g.setColour(juce::Colour(0xffff3333));  // Red for hot
+            g.setColour(juce::Colour(0xffff3333));
         else if (levelL > 0.7f)
-            g.setColour(juce::Colour(0xffffaa00));  // Yellow/orange
+            g.setColour(juce::Colour(0xffffaa00));
         else
-            g.setColour(juce::Colour(0xff44cc44));  // Green
+            g.setColour(juce::Colour(0xff44cc44));
         g.fillRect(meterRect);
     }
 
     // Right channel
-    bounds.removeFromLeft(2);  // Gap
+    bounds.removeFromLeft(2);
     auto rightBounds = bounds;
     levelHeight = static_cast<int>(juce::jmin(1.0f, levelR) * meterHeight);
 
