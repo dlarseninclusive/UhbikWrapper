@@ -45,6 +45,13 @@ jobs:
           name: UhbikWrapper-Linux-VST3
           path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
 
+      - name: Upload Linux CLAP
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-Linux-CLAP
+          path: build/UhbikWrapper_artefacts/Release/CLAP/*.clap
+
       - name: Upload Windows VST3
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -52,12 +59,26 @@ jobs:
           name: UhbikWrapper-Windows-VST3
           path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
 
+      - name: Upload Windows CLAP
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-Windows-CLAP
+          path: build/UhbikWrapper_artefacts/Release/CLAP/*.clap
+
       - name: Upload macOS VST3
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: UhbikWrapper-macOS-VST3
           path: build/UhbikWrapper_artefacts/Release/VST3/*.vst3
+
+      - name: Upload macOS CLAP
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UhbikWrapper-macOS-CLAP
+          path: build/UhbikWrapper_artefacts/Release/CLAP/*.clap
 
       - name: Upload macOS AU
         if: runner.os == 'macOS'
@@ -85,8 +106,11 @@ jobs:
         run: |
           cd artifacts
           zip -r ../UhbikWrapper-Linux-VST3.zip UhbikWrapper-Linux-VST3/
+          zip -r ../UhbikWrapper-Linux-CLAP.zip UhbikWrapper-Linux-CLAP/
           zip -r ../UhbikWrapper-Windows-VST3.zip UhbikWrapper-Windows-VST3/
+          zip -r ../UhbikWrapper-Windows-CLAP.zip UhbikWrapper-Windows-CLAP/
           zip -r ../UhbikWrapper-macOS-VST3.zip UhbikWrapper-macOS-VST3/
+          zip -r ../UhbikWrapper-macOS-CLAP.zip UhbikWrapper-macOS-CLAP/
           zip -r ../UhbikWrapper-macOS-AU.zip UhbikWrapper-macOS-AU/
 
       - name: Create Release
@@ -94,21 +118,23 @@ jobs:
         with:
           files: |
             UhbikWrapper-Linux-VST3.zip
+            UhbikWrapper-Linux-CLAP.zip
             UhbikWrapper-Windows-VST3.zip
+            UhbikWrapper-Windows-CLAP.zip
             UhbikWrapper-macOS-VST3.zip
+            UhbikWrapper-macOS-CLAP.zip
             UhbikWrapper-macOS-AU.zip
           body: |
             ## Uhbik Wrapper ${{ github.ref_name }}
 
-            A lightweight VST3 wrapper for chaining multiple effects with preset management.
+            A lightweight plugin wrapper for chaining multiple effects with preset management.
 
             ### Downloads
-            | Platform | File | Install Location |
-            |----------|------|------------------|
-            | Linux | `UhbikWrapper-Linux-VST3.zip` | `~/.vst3/` |
-            | Windows | `UhbikWrapper-Windows-VST3.zip` | `C:\Program Files\Common Files\VST3\` |
-            | macOS (VST3) | `UhbikWrapper-macOS-VST3.zip` | `~/Library/Audio/Plug-Ins/VST3/` |
-            | macOS (AU) | `UhbikWrapper-macOS-AU.zip` | `~/Library/Audio/Plug-Ins/Components/` |
+            | Platform | VST3 | CLAP | AU |
+            |----------|------|------|-----|
+            | Linux | [VST3](UhbikWrapper-Linux-VST3.zip) → `~/.vst3/` | [CLAP](UhbikWrapper-Linux-CLAP.zip) → `~/.clap/` | - |
+            | Windows | [VST3](UhbikWrapper-Windows-VST3.zip) → `C:\Program Files\Common Files\VST3\` | [CLAP](UhbikWrapper-Windows-CLAP.zip) → `C:\Program Files\Common Files\CLAP\` | - |
+            | macOS | [VST3](UhbikWrapper-macOS-VST3.zip) → `~/Library/Audio/Plug-Ins/VST3/` | [CLAP](UhbikWrapper-macOS-CLAP.zip) → `~/Library/Audio/Plug-Ins/CLAP/` | [AU](UhbikWrapper-macOS-AU.zip) → `~/Library/Audio/Plug-Ins/Components/` |
 
             > **Note**: macOS builds are unsigned. You may need to right-click → Open or allow in System Settings → Privacy & Security.
           draft: false

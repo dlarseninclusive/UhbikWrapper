@@ -11,6 +11,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(juce)
 
+# Import CLAP JUCE extensions for CLAP plugin format support
+FetchContent_Declare(
+    clap-juce-extensions
+    GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
+    GIT_TAG        main
+)
+FetchContent_MakeAvailable(clap-juce-extensions)
+
 # Set plugin formats based on platform
 if(APPLE)
     set(PLUGIN_FORMATS AU VST3 Standalone)
@@ -31,6 +39,13 @@ juce_add_plugin(UhbikWrapper
     PLUGIN_CODE Uhbk
     FORMATS ${PLUGIN_FORMATS}
     PRODUCT_NAME "Uhbik Wrapper"
+)
+
+# Add CLAP format support via clap-juce-extensions
+clap_juce_extensions_plugin(
+    TARGET UhbikWrapper
+    CLAP_ID "com.mycompany.uhbik-wrapper"
+    CLAP_FEATURES audio-effect utility
 )
 
 target_sources(UhbikWrapper PRIVATE
