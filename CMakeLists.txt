@@ -43,12 +43,13 @@ juce_add_plugin(UhbikWrapper
     PRODUCT_NAME "UhbikWrapper"
 )
 
-# Add CLAP format support via clap-juce-extensions
-clap_juce_extensions_plugin(
-    TARGET UhbikWrapper
-    CLAP_ID "com.inclusiveaudio.uhbikwrapper"
-    CLAP_FEATURES audio-effect utility
-)
+# CLAP format export disabled due to sidechain bus compatibility issues
+# with clap-juce-extensions. VST3 works fine.
+# clap_juce_extensions_plugin(
+#     TARGET UhbikWrapper
+#     CLAP_ID "com.inclusiveaudio.uhbikwrapper"
+#     CLAP_FEATURES audio-effect utility
+# )
 
 target_sources(UhbikWrapper PRIVATE
     Source/PluginProcessor.cpp
