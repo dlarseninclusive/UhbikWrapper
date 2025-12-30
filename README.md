@@ -206,6 +206,9 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 ### State Management (Planned)
 - [ ] **Undo/Redo**: Undo changes to effect chain and parameters
 
+### Plugin Hosting (Planned)
+- [ ] **CLAP Plugin Hosting**: Load CLAP plugins in addition to VST3
+
 ### Platform Support (Planned)
 - [ ] **Code Signing**: macOS notarization and Windows signing for distribution
 
