@@ -1,8 +1,8 @@
 # Uhbik Wrapper
 
-A lightweight, "Reason-style" VST3/CLAP wrapper designed specifically for hosting **U-he Uhbik** and other VST3 effects. It provides a transparent, "Combinator-like" interface that allows you to chain multiple effects together and manage them as a single meta-preset.
+A lightweight, "Reason-style" VST3 wrapper designed specifically for hosting **U-he Uhbik** and other VST3 effects. It provides a transparent, "Combinator-like" interface that allows you to chain multiple effects together and manage them as a single meta-preset.
 
-**Available formats:** VST3, CLAP, AU (macOS)
+**Available formats:** VST3, AU (macOS)
 
 ![Uhbik Wrapper Screenshot](docs/screenshot.png)
 
@@ -53,9 +53,7 @@ cmake --build build --config Release
 ```bash
 ./setup.sh
 ```
-Install locations:
-*   VST3: `~/.vst3/UhbikWrapper.vst3`
-*   CLAP: `~/.clap/UhbikWrapper.clap`
+Install location: `~/.vst3/UhbikWrapper.vst3`
 
 Prerequisites:
 *   **C++ Compiler**: GCC (g++)
@@ -65,24 +63,20 @@ Prerequisites:
 **Windows**:
 *   Requires Visual Studio 2019+ or Build Tools for Visual Studio
 *   Install VST3 to `C:\Program Files\Common Files\VST3\`
-*   Install CLAP to `C:\Program Files\Common Files\CLAP\`
 
 **macOS**:
 *   Requires Xcode Command Line Tools (`xcode-select --install`)
-*   Builds VST3, CLAP, and AU formats
+*   Builds VST3 and AU formats
 *   Install VST3 to `/Library/Audio/Plug-Ins/VST3/`
-*   Install CLAP to `/Library/Audio/Plug-Ins/CLAP/`
 *   Install AU to `/Library/Audio/Plug-Ins/Components/`
 
 **macOS Gatekeeper (important!):** Downloaded plugins are quarantined. Remove the quarantine flag:
 ```bash
 # Remove quarantine from all plugins in the folder
 xattr -cr "/Library/Audio/Plug-Ins/VST3"
-xattr -cr "/Library/Audio/Plug-Ins/CLAP"
 
 # Re-sign (ad-hoc) and clear cache
 sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/UhbikWrapper.vst3"
-sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/CLAP/UhbikWrapper.clap"
 ```
 Then rescan plugins in your DAW (Bitwig: Settings → Locations → Clear cache → Rescan).
 
@@ -183,7 +177,6 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [x] **Sidechain Passthrough**: Routes DAW sidechain input to hosted plugins
 - [x] **DAW Parameters**: Input/output gain, dry/wet mix, 8 macro knobs exposed via APVTS
 - [x] **Cross-Platform Builds**: GitHub Actions CI for Linux, Windows, macOS
-- [x] **CLAP Format**: Open-source plugin format support via clap-juce-extensions
 - [x] **Plugin Availability Filter**: Highlight presets with missing plugins (orange + warning icon)
 - [x] **Per-Effect Mixing**: Input/output gain and wet/dry mix per effect slot
 - [x] **Level Meters**: Per-effect input/output meters and master meters in footer
@@ -206,7 +199,8 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 ### State Management (Planned)
 - [ ] **Undo/Redo**: Undo changes to effect chain and parameters
 
-### Plugin Hosting (Planned)
+### Plugin Formats (Planned)
+- [ ] **CLAP Format Export**: Currently disabled due to sidechain bus compatibility issues with clap-juce-extensions
 - [ ] **CLAP Plugin Hosting**: Load CLAP plugins in addition to VST3
 
 ### Platform Support (Planned)
