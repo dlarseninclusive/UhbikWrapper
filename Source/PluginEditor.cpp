@@ -269,11 +269,11 @@ void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
     pluginSelector.clear();
     effectPlugins.clear();
 
-    auto& pluginList = audioProcessor.getKnownPluginList();
-    auto types = pluginList.getTypes();
+    // Get unified list of all available plugins (VST3 + CLAP)
+    const auto& allPlugins = audioProcessor.getAvailablePlugins();
 
     // Filter for effects only (no instruments)
-    for (const auto& desc : types)
+    for (const auto& desc : allPlugins)
     {
         if (!desc.isInstrument)
         {
@@ -281,7 +281,7 @@ void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
         }
     }
 
-    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (filtered from " << types.size() << " total)" << std::endl << std::flush;
+    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (VST3 + CLAP)" << std::endl << std::flush;
 
     int id = 1;
     for (const auto& desc : effectPlugins)

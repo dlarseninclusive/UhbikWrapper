@@ -54,7 +54,7 @@ private:
     juce::Viewport chainViewport;
     juce::Component chainContainer;
     std::vector<std::unique_ptr<EffectSlotComponent>> slotComponents;
-    std::vector<juce::PluginDescription> effectPlugins; // Effects only (no instruments)
+    std::vector<UnifiedPluginDescription> effectPlugins; // Effects only (no instruments) - VST3 and CLAP
 
     juce::ComboBox pluginSelector;
     juce::TextButton addButton{"+"};

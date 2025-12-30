@@ -2,11 +2,35 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#include "CLAPPluginHost.h"
+
+// Unified plugin description that works for both VST3 and CLAP
+struct UnifiedPluginDescription
+{
+    enum class Format { VST3, CLAP };
+
+    Format format = Format::VST3;
+    juce::String name;
+    juce::String pluginId;      // VST3: uid, CLAP: reverse-DNS ID
+    juce::String pluginPath;
+    juce::String vendor;
+    bool isInstrument = false;
+
+    // Original descriptions for loading
+    juce::PluginDescription vst3Desc;
+    CLAPPluginDescription clapDesc;
+
+    bool isValid() const { return name.isNotEmpty(); }
+    juce::String getFormatName() const { return format == Format::CLAP ? "CLAP" : "VST3"; }
+};
 
 struct EffectSlot
 {
-    std::unique_ptr<juce::AudioPluginInstance> plugin;
-    juce::PluginDescription description;
+    // Either VST3 or CLAP plugin (one or the other, not both)
+    std::unique_ptr<juce::AudioPluginInstance> vst3Plugin;
+    std::unique_ptr<CLAPPluginInstance> clapPlugin;
+
+    UnifiedPluginDescription description;
     bool bypassed = false;
     std::atomic<bool> ready{false};  // Set true after prepareToPlay completes
 
@@ -24,9 +48,15 @@ struct EffectSlot
     EffectSlot() = default;
     ~EffectSlot() = default;
 
+    // Helper to check if this slot has a valid plugin
+    bool hasPlugin() const { return vst3Plugin != nullptr || clapPlugin != nullptr; }
+    bool isVST3() const { return vst3Plugin != nullptr; }
+    bool isCLAP() const { return clapPlugin != nullptr; }
+
     // Custom move constructor since atomic isn't moveable
     EffectSlot(EffectSlot&& other) noexcept
-        : plugin(std::move(other.plugin))
+        : vst3Plugin(std::move(other.vst3Plugin))
+        , clapPlugin(std::move(other.clapPlugin))
         , description(std::move(other.description))
         , bypassed(other.bypassed)
         , ready(other.ready.load())
@@ -44,7 +74,8 @@ struct EffectSlot
     {
         if (this != &other)
         {
-            plugin = std::move(other.plugin);
+            vst3Plugin = std::move(other.vst3Plugin);
+            clapPlugin = std::move(other.clapPlugin);
             description = std::move(other.description);
             bypassed = other.bypassed;
             ready.store(other.ready.load());
@@ -110,6 +141,10 @@ public:
     // --- Plugin Hosting Infrastructure ---
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::KnownPluginList knownPluginList;
+    CLAPPluginScanner clapScanner;
+
+    // Unified list of all available plugins (VST3 + CLAP)
+    std::vector<UnifiedPluginDescription> availablePlugins;
 
     // Effect chain - use SpinLock for audio-safe synchronization
     std::vector<EffectSlot> effectChain;
@@ -117,7 +152,9 @@ public:
 
     // Chain management methods
     void scanForPlugins();
-    void addPlugin(const juce::PluginDescription& desc);
+    void addPlugin(const juce::PluginDescription& desc);  // VST3
+    void addPlugin(const CLAPPluginDescription& desc);    // CLAP
+    void addPlugin(const UnifiedPluginDescription& desc); // Unified
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex);
     void clearChain();
@@ -125,9 +162,10 @@ public:
     void setSlotInputGain(int index, float gainDb);
     void setSlotOutputGain(int index, float gainDb);
     void setSlotMix(int index, float mixPercent);
-    juce::AudioPluginInstance* getPluginAt(int index);
+    juce::AudioPluginInstance* getPluginAt(int index);  // Returns VST3 plugin or nullptr
     int getChainSize() const { return static_cast<int>(effectChain.size()); }
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
+    const std::vector<UnifiedPluginDescription>& getAvailablePlugins() const { return availablePlugins; }
 
     // Preset management
     static juce::File getPresetsFolder();

@@ -12,6 +12,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(juce)
 
 # Import CLAP JUCE extensions for CLAP plugin format support
+# This also includes the CLAP SDK and clap-helpers which we use for hosting
 FetchContent_Declare(
     clap-juce-extensions
     GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
@@ -43,12 +44,13 @@ juce_add_plugin(UhbikWrapper
     PRODUCT_NAME "UhbikWrapper"
 )
 
-# Add CLAP format support via clap-juce-extensions
-clap_juce_extensions_plugin(
-    TARGET UhbikWrapper
-    CLAP_ID "com.inclusiveaudio.uhbikwrapper"
-    CLAP_FEATURES audio-effect utility
-)
+# CLAP format export disabled due to sidechain bus compatibility issues
+# with clap-juce-extensions. VST3 works fine, and CLAP hosting is supported.
+# clap_juce_extensions_plugin(
+#     TARGET UhbikWrapper
+#     CLAP_ID "com.inclusiveaudio.uhbikwrapper"
+#     CLAP_FEATURES audio-effect utility
+# )
 
 target_sources(UhbikWrapper PRIVATE
     Source/PluginProcessor.cpp
@@ -59,6 +61,8 @@ target_sources(UhbikWrapper PRIVATE
     Source/EffectSlot.h
     Source/PresetBrowser.cpp
     Source/PresetBrowser.h
+    Source/CLAPPluginHost.cpp
+    Source/CLAPPluginHost.h
 )
 
 target_compile_definitions(UhbikWrapper PUBLIC
@@ -81,4 +85,13 @@ target_link_libraries(UhbikWrapper PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
+    # CLAP hosting support (from clap-juce-extensions bundled libraries)
+    clap
+    clap-helpers
+)
+
+# Add CLAP include directories (from clap-juce-extensions)
+target_include_directories(UhbikWrapper PRIVATE
+    ${clap-juce-extensions_SOURCE_DIR}/clap-libs/clap/include
+    ${clap-juce-extensions_SOURCE_DIR}/clap-libs/clap-helpers/include
 )
