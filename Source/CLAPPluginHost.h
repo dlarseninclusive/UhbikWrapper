@@ -11,6 +11,33 @@
 
 // Forward declarations
 struct CLAPPluginInstance;
+class CLAPPluginInstance;
+
+// Component that hosts a CLAP plugin's GUI
+class CLAPEditorComponent : public juce::Component
+{
+public:
+    CLAPEditorComponent(CLAPPluginInstance* instance);
+    ~CLAPEditorComponent() override;
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+    void parentHierarchyChanged() override;
+
+    bool isGuiCreated() const { return guiCreated; }
+
+private:
+    CLAPPluginInstance* pluginInstance = nullptr;
+    bool guiCreated = false;
+    bool guiAttached = false;
+    uint32_t guiWidth = 800;
+    uint32_t guiHeight = 600;
+
+    void createAndAttachGui();
+    void destroyGui();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CLAPEditorComponent)
+};
 
 // Description of a CLAP plugin (analogous to juce::PluginDescription)
 struct CLAPPluginDescription
@@ -56,6 +83,10 @@ public:
     juce::Component* createEditor();
     void closeEditor();
 
+    // For CLAPEditorComponent to access
+    const clap_plugin* getPlugin() const { return plugin; }
+    const clap_plugin_gui* getGuiExtension() const { return guiExt; }
+
     // Info
     const CLAPPluginDescription& getDescription() const { return description; }
     juce::String getName() const { return description.name; }
@@ -87,18 +118,24 @@ private:
     double currentSampleRate = 44100.0;
     uint32_t currentBlockSize = 512;
 
-    // Audio port info
-    uint32_t numAudioInputs = 0;
-    uint32_t numAudioOutputs = 0;
+    // Audio port info - per-port channel counts
+    struct AudioPortInfo {
+        uint32_t channelCount = 0;
+        bool isMain = false;
+    };
+    std::vector<AudioPortInfo> inputPorts;
+    std::vector<AudioPortInfo> outputPorts;
+    uint32_t totalInputChannels = 0;
+    uint32_t totalOutputChannels = 0;
 
-    // Process buffers
-    std::vector<float*> inputBufferPtrs;
-    std::vector<float*> outputBufferPtrs;
-    clap_audio_buffer inputAudioBuffer;
-    clap_audio_buffer outputAudioBuffer;
+    // Process buffers - organized per port (CLAP requires this)
+    std::vector<std::vector<float*>> inputPortBuffers;   // [port][channel]
+    std::vector<std::vector<float*>> outputPortBuffers;  // [port][channel]
+    std::vector<clap_audio_buffer> inputAudioBuffers;    // One per input port
+    std::vector<clap_audio_buffer> outputAudioBuffers;   // One per output port
     clap_process processContext;
 
-    // Scratch buffers for extra channels (e.g., sidechain inputs)
+    // Scratch buffer for silent channels (sidechain when not connected)
     juce::AudioBuffer<float> scratchBuffer;
 
     // Event queues (required by CLAP process)

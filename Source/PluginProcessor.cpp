@@ -47,8 +47,20 @@ UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
        apvts(*this, nullptr, "Parameters", createParameterLayout())
 #endif
 {
+    // Force immediate flush to see output before any crash
+    std::cerr << "[RACK] === CONSTRUCTOR START ===" << std::endl;
+    std::cerr.flush();
+
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+
+    std::cerr << "[RACK] Scanning VST3..." << std::endl;
+    std::cerr.flush();
+
     scanForPlugins();
+
+    std::cerr << "[RACK] === CONSTRUCTOR DONE ===" << std::endl;
+    std::cerr.flush();
+
     ensurePresetsFolderExists();
 }
 
@@ -119,31 +131,42 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
     std::cerr << "[RACK] VST3 plugins found: " << knownPluginList.getNumTypes() << std::endl << std::flush;
 
     // === Scan CLAP plugins ===
-    std::cerr << "[RACK] Starting CLAP scan..." << std::endl << std::flush;
-    clapScanner.clear();
-    clapScanner.scanDefaultLocations();
-    std::cerr << "[RACK] CLAP scan complete. Found: " << clapScanner.getPlugins().size() << std::endl << std::flush;
+    // Delay CLAP scan slightly to avoid conflicts with library loading during project restore
+    std::cerr << "[RACK] Deferring CLAP scan..." << std::endl;
+    std::cerr.flush();
+    juce::Timer::callAfterDelay(500, [this]() {
+        std::cerr << "[RACK] Starting deferred CLAP scan..." << std::endl;
+        std::cerr.flush();
+        clapScanner.clear();
+        clapScanner.scanDefaultLocations();
+        std::cerr << "[RACK] CLAP scan complete. Found: " << clapScanner.getPlugins().size() << std::endl;
+        std::cerr.flush();
 
-    // Add CLAP plugins to unified list
-    for (const auto& clapDesc : clapScanner.getPlugins())
-    {
-        // Skip instruments, we only want effects
-        if (clapDesc.isInstrument)
-            continue;
+        // Add CLAP plugins to unified list
+        for (const auto& clapDesc : clapScanner.getPlugins())
+        {
+            if (clapDesc.isInstrument)
+                continue;
+            UnifiedPluginDescription unified;
+            unified.format = UnifiedPluginDescription::Format::CLAP;
+            unified.name = clapDesc.name + " (CLAP)";
+            unified.pluginId = clapDesc.pluginId;
+            unified.pluginPath = clapDesc.pluginPath;
+            unified.vendor = clapDesc.vendor;
+            unified.isInstrument = clapDesc.isInstrument;
+            unified.clapDesc = clapDesc;
+            availablePlugins.push_back(unified);
+        }
+        std::cerr << "[RACK] CLAP effects added. Total plugins: " << availablePlugins.size() << std::endl;
+        std::cerr.flush();
 
-        UnifiedPluginDescription unified;
-        unified.format = UnifiedPluginDescription::Format::CLAP;
-        unified.name = clapDesc.name + " (CLAP)";  // Add suffix to distinguish from VST3
-        unified.pluginId = clapDesc.pluginId;
-        unified.pluginPath = clapDesc.pluginPath;
-        unified.vendor = clapDesc.vendor;
-        unified.isInstrument = clapDesc.isInstrument;
-        unified.clapDesc = clapDesc;
-        availablePlugins.push_back(unified);
-    }
+        // Notify any listeners that the plugin list has changed
+        sendChangeMessage();
+    });
 
-    std::cerr << "[RACK] CLAP effects added to list: " << clapScanner.getPlugins().size() << std::endl << std::flush;
-    std::cerr << "[RACK] Total available plugins: " << availablePlugins.size() << std::endl << std::flush;
+    // VST3 plugins are available immediately, CLAP plugins will be added after delay
+    std::cerr << "[RACK] VST3 plugins available immediately: " << availablePlugins.size() << std::endl;
+    std::cerr.flush();
 }
 
 void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
@@ -445,9 +468,10 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     auto* wrapperSidechain = getBus(true, 1);
     bool wrapperHasSidechain = (wrapperSidechain != nullptr && wrapperSidechain->isEnabled());
 
-    if (debugLogging.load())
-        std::cerr << "[RACK] prepareToPlay: SR=" << sampleRate << " BS=" << samplesPerBlock
-                  << " sidechain=" << (wrapperHasSidechain ? "CONNECTED" : "not connected") << std::endl << std::flush;
+    // Always log prepareToPlay for debugging
+    std::cerr << "[RACK] prepareToPlay: SR=" << sampleRate << " BS=" << samplesPerBlock
+              << " sidechain=" << (wrapperHasSidechain ? "CONNECTED" : "not connected") << std::endl;
+    std::cerr.flush();
 
     for (auto& slot : effectChain)
     {
@@ -512,6 +536,13 @@ bool UhbikWrapperAudioProcessor::isBusesLayoutSupported (const BusesLayout& layo
 
 void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    static int processCallCount = 0;
+    if (processCallCount < 5)
+    {
+        std::cerr << "[RACK] processBlock #" << processCallCount << " samples=" << buffer.getNumSamples() << std::endl << std::flush;
+        processCallCount++;
+    }
+
     juce::ScopedNoDenormals noDenormals;
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
@@ -648,8 +679,14 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             else if (slot.isCLAP())
             {
                 // CLAP processing - pass stereo buffer
-                if (numBufferChannels >= mainChannels)
+                if (slot.clapPlugin != nullptr && slot.clapPlugin->isActive() && numBufferChannels >= mainChannels)
                 {
+                    static int clapProcessCount = 0;
+                    if (clapProcessCount < 3)
+                    {
+                        std::cerr << "[RACK] CLAP process #" << clapProcessCount << std::endl << std::flush;
+                        clapProcessCount++;
+                    }
                     float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
                     juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
                     slot.clapPlugin->process(mainBuffer, midiMessages);
@@ -890,8 +927,8 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
 
 void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (debugLogging.load())
-        std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
+    // Always log restore start to debug crashes
+    std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
 
     if (data == nullptr || sizeInBytes == 0)
     {
@@ -961,6 +998,8 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
         if (format == "CLAP")
         {
             // Restore CLAP plugin
+            std::cerr << "[RACK] Restoring CLAP plugin..." << std::endl << std::flush;
+
             CLAPPluginDescription clapDesc;
             clapDesc.pluginId = slotState.getProperty("clapPluginId", "").toString();
             clapDesc.pluginPath = slotState.getProperty("clapPluginPath", "").toString();
@@ -968,8 +1007,15 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             clapDesc.name = slotState.getProperty("clapName", "").toString();
             clapDesc.version = slotState.getProperty("clapVersion", "").toString();
 
+            std::cerr << "[RACK] CLAP desc: " << clapDesc.name << " path=" << clapDesc.pluginPath << std::endl << std::flush;
+
             auto clapPlugin = std::make_unique<CLAPPluginInstance>(clapDesc);
-            if (clapPlugin->load() && clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
+            std::cerr << "[RACK] CLAP instance created, loading..." << std::endl << std::flush;
+
+            bool loaded = clapPlugin->load();
+            std::cerr << "[RACK] CLAP load result: " << (loaded ? "OK" : "FAILED") << std::endl << std::flush;
+
+            if (loaded && clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
             {
                 // Restore CLAP state
                 juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();

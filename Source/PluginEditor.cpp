@@ -143,6 +143,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     duckerReleaseSlider.removeListener(this);
     duckerHoldSlider.removeListener(this);
     editorWindowCache.clear();
+    clapEditorWindowCache.clear();
 }
 
 void UhbikWrapperAudioProcessorEditor::timerCallback()
@@ -186,6 +187,7 @@ void UhbikWrapperAudioProcessorEditor::timerCallback()
 
 void UhbikWrapperAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 {
+    populatePluginSelector();  // Update dropdown (e.g., after deferred CLAP scan)
     refreshChainDisplay();
 }
 
@@ -294,7 +296,7 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
 {
     slotComponents.clear();
 
-    // Clean up editor windows for plugins that no longer exist
+    // Clean up VST3 editor windows for plugins that no longer exist
     // Just hide them and remove from cache - let natural destruction happen
     for (auto it = editorWindowCache.begin(); it != editorWindowCache.end(); )
     {
@@ -312,6 +314,29 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
             if (it->second != nullptr)
                 it->second->setVisible(false);
             it = editorWindowCache.erase(it);
+        }
+        else
+            ++it;
+    }
+
+    // Clean up CLAP editor windows for plugins that no longer exist
+    for (auto it = clapEditorWindowCache.begin(); it != clapEditorWindowCache.end(); )
+    {
+        bool found = false;
+        for (int i = 0; i < audioProcessor.getChainSize(); ++i)
+        {
+            auto& slot = audioProcessor.effectChain[static_cast<size_t>(i)];
+            if (slot.isCLAP() && slot.clapPlugin.get() == it->first)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            if (it->second != nullptr)
+                it->second->setVisible(false);
+            it = clapEditorWindowCache.erase(it);
         }
         else
             ++it;
@@ -414,9 +439,62 @@ void UhbikWrapperAudioProcessorEditor::effectSlotMixChanged(int slotIndex, float
 
 void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
 {
-    if (slotIndex < 0 || slotIndex >= audioProcessor.getChainSize())
-        return;
+    std::cerr << "[UI] openPluginEditor called for slot: " << slotIndex << std::endl << std::flush;
 
+    if (slotIndex < 0 || slotIndex >= audioProcessor.getChainSize())
+    {
+        std::cerr << "[UI] Invalid slot index" << std::endl << std::flush;
+        return;
+    }
+
+    auto& slot = audioProcessor.effectChain[static_cast<size_t>(slotIndex)];
+    std::cerr << "[UI] Slot: isCLAP=" << slot.isCLAP() << " isVST3=" << slot.isVST3()
+              << " hasPlugin=" << slot.hasPlugin() << std::endl << std::flush;
+
+    // Handle CLAP plugins
+    if (slot.isCLAP() && slot.clapPlugin)
+    {
+        auto* clapPlugin = slot.clapPlugin.get();
+        std::cerr << "[UI] Opening CLAP editor for: " << slot.description.name << std::endl << std::flush;
+
+        if (!clapPlugin->hasEditor())
+        {
+            std::cerr << "[UI] CLAP plugin has no editor" << std::endl << std::flush;
+            return;
+        }
+
+        // Check if we already have a cached window for this CLAP plugin
+        auto it = clapEditorWindowCache.find(clapPlugin);
+        if (it != clapEditorWindowCache.end() && it->second != nullptr)
+        {
+            it->second->setVisible(true);
+            it->second->toFront(true);
+            return;
+        }
+
+        // Create the CLAP editor - it creates its own native window via addToDesktop
+        auto* editor = clapPlugin->createEditor();
+        if (editor == nullptr)
+        {
+            std::cerr << "[UI] CLAP createEditor returned nullptr" << std::endl << std::flush;
+            return;
+        }
+
+        std::cerr << "[UI] CLAP editor created, size: " << editor->getWidth() << "x" << editor->getHeight() << std::endl << std::flush;
+
+        // The CLAP editor uses addToDesktop() so it's already a top-level window
+        // Just center and show it - no need for a wrapper DocumentWindow
+        auto screenBounds = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+        editor->setCentrePosition(screenBounds.getCentreX(), screenBounds.getCentreY());
+        editor->setVisible(true);
+        editor->toFront(true);
+
+        // We don't cache in clapEditorWindowCache since it's not an EditorWindow
+        // The editor is owned by the CLAPPluginInstance
+        return;
+    }
+
+    // Handle VST3 plugins
     auto* plugin = audioProcessor.getPluginAt(slotIndex);
     if (plugin == nullptr || !plugin->hasEditor())
         return;
@@ -862,8 +940,15 @@ void UhbikWrapperAudioProcessorEditor::initPresetRequested()
 {
     std::cerr << "[UI] Init/clear chain requested" << std::endl << std::flush;
 
-    // Hide editor windows first (don't destroy - let refreshChainDisplay handle cleanup)
+    // Hide VST3 editor windows first (don't destroy - let refreshChainDisplay handle cleanup)
     for (auto& entry : editorWindowCache)
+    {
+        if (entry.second != nullptr)
+            entry.second->setVisible(false);
+    }
+
+    // Hide CLAP editor windows
+    for (auto& entry : clapEditorWindowCache)
     {
         if (entry.second != nullptr)
             entry.second->setVisible(false);
