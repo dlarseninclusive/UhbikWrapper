@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "CLAPPluginHost.h"
+#include "LFO.h"
 
 // Unified plugin description that works for both VST3 and CLAP
 struct UnifiedPluginDescription
@@ -192,6 +193,30 @@ public:
 
     // Ducker metering (for UI gain reduction display)
     std::atomic<float> duckerGainReduction{0.0f};    // 0.0 to 1.0 (amount of reduction)
+
+    // --- Modulation System ---
+    static constexpr int NUM_LFOS = 4;
+    LFO lfos[NUM_LFOS];
+
+    // Modulation routing
+    std::vector<ModulationRoute> modulationRoutes;
+    juce::SpinLock modulationLock;
+
+    // Modulation management methods
+    void addModulationRoute(int lfoIndex, int slotIndex, clap_id paramId, float amount);
+    void removeModulationRoute(int routeIndex);
+    void clearModulationRoutes();
+    void setModulationAmount(int routeIndex, float amount);
+    const std::vector<ModulationRoute>& getModulationRoutes() const { return modulationRoutes; }
+
+    // Get modulatable parameters from a slot
+    std::vector<CLAPParameterInfo> getModulatableParametersForSlot(int slotIndex) const;
+
+    // LFO control
+    void setLFOFrequency(int lfoIndex, float hz);
+    void setLFOWaveform(int lfoIndex, LFOWaveform waveform);
+    void setLFODepth(int lfoIndex, float depth);
+    LFO* getLFO(int index) { return (index >= 0 && index < NUM_LFOS) ? &lfos[index] : nullptr; }
 
 private:
     // Ducker envelope state (audio thread only)

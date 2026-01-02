@@ -100,5 +100,54 @@ private:
     juce::Label duckerReleaseLabel{"", "Release"};
     juce::Label duckerHoldLabel{"", "Hold"};
 
+    // Modulation panel (collapsible, tabbed)
+    bool modPanelExpanded = false;
+    juce::TextButton modPanelToggleButton{"MODULATION"};
+
+    // Tab buttons
+    enum class ModTab { LFOs, Matrix };
+    ModTab currentModTab = ModTab::LFOs;
+    juce::TextButton modTabLFOsButton{"LFOs"};
+    juce::TextButton modTabMatrixButton{"Matrix"};
+
+    // LFO controls (4 LFOs)
+    struct LFOControls {
+        juce::Slider rateSlider;
+        juce::Slider depthSlider;
+        juce::ComboBox waveformBox;
+        juce::Label rateLabel{"", "Rate"};
+        juce::Label depthLabel{"", "Depth"};
+        juce::Label nameLabel{"", "LFO 1"};
+    };
+    std::array<LFOControls, 4> lfoControls;
+
+    // Matrix controls
+    juce::ComboBox matrixSourceBox;      // Select LFO source
+    juce::ComboBox matrixSlotBox;        // Select effect slot
+    juce::ComboBox matrixParamBox;       // Select parameter
+    juce::Slider matrixAmountSlider;     // Modulation amount
+    juce::TextButton matrixAddButton{"Add Route"};
+    juce::TextButton matrixClearButton{"Clear All"};
+    juce::Label matrixRoutesLabel{"", "Active Routes:"};
+    juce::ListBox matrixRoutesList;
+
+    // Route list model
+    class ModRouteListModel : public juce::ListBoxModel {
+    public:
+        ModRouteListModel(UhbikWrapperAudioProcessorEditor& e) : editor(e) {}
+        int getNumRows() override;
+        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
+        void listBoxItemClicked(int row, const juce::MouseEvent&) override;
+    private:
+        UhbikWrapperAudioProcessorEditor& editor;
+    };
+    std::unique_ptr<ModRouteListModel> modRouteListModel;
+
+    void updateModulationUI();
+    void updateModTabButtons();
+    void populateMatrixSlotBox();
+    void populateMatrixParamBox();
+    void refreshModRoutesList();
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessorEditor)
 };

@@ -1,5 +1,7 @@
 #include "CLAPPluginHost.h"
+#include <clap/ext/params.h>
 #include <iostream>
+#include <algorithm>
 
 #if JUCE_WINDOWS
     #include <windows.h>
@@ -310,15 +312,19 @@ void CLAPPluginInstance::hostRequestCallback(const clap_host* /*host*/)
     // Plugin wants main-thread callback
 }
 
-// Empty event queue callbacks
-uint32_t CLAPPluginInstance::inputEventsSize(const clap_input_events* /*list*/)
+// Event queue callbacks - now with modulation support
+uint32_t CLAPPluginInstance::inputEventsSize(const clap_input_events* list)
 {
-    return 0;  // No input events
+    auto* self = static_cast<CLAPPluginInstance*>(list->ctx);
+    return static_cast<uint32_t>(self->pendingModEvents.size());
 }
 
-const clap_event_header* CLAPPluginInstance::inputEventsGet(const clap_input_events* /*list*/, uint32_t /*index*/)
+const clap_event_header* CLAPPluginInstance::inputEventsGet(const clap_input_events* list, uint32_t index)
 {
-    return nullptr;  // No events to get
+    auto* self = static_cast<CLAPPluginInstance*>(list->ctx);
+    if (index < self->pendingModEvents.size())
+        return &self->pendingModEvents[index].header;
+    return nullptr;
 }
 
 bool CLAPPluginInstance::outputEventsTryPush(const clap_output_events* /*list*/, const clap_event_header* /*event*/)
@@ -846,6 +852,99 @@ void CLAPPluginInstance::setParameterValue(clap_id paramId, double value)
         return;
     // Note: For proper implementation, parameter changes should go through the event system
     // This is a simplified direct-set approach
+    juce::ignoreUnused(paramId, value);
+}
+
+std::vector<CLAPParameterInfo> CLAPPluginInstance::getAllParameters() const
+{
+    std::vector<CLAPParameterInfo> params;
+
+    if (!plugin || !paramsExt)
+        return params;
+
+    uint32_t count = paramsExt->count(plugin);
+    params.reserve(count);
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        clap_param_info info;
+        if (paramsExt->get_info(plugin, i, &info))
+        {
+            CLAPParameterInfo paramInfo;
+            paramInfo.id = info.id;
+            paramInfo.name = info.name;
+            paramInfo.module = info.module;
+            paramInfo.minValue = info.min_value;
+            paramInfo.maxValue = info.max_value;
+            paramInfo.defaultValue = info.default_value;
+            paramInfo.cookie = info.cookie;
+            paramInfo.isModulatable = (info.flags & CLAP_PARAM_IS_MODULATABLE) != 0;
+            paramInfo.isAutomatable = (info.flags & CLAP_PARAM_IS_AUTOMATABLE) != 0;
+            paramInfo.isStepped = (info.flags & CLAP_PARAM_IS_STEPPED) != 0;
+
+            params.push_back(paramInfo);
+        }
+    }
+
+    return params;
+}
+
+std::vector<CLAPParameterInfo> CLAPPluginInstance::getModulatableParameters() const
+{
+    std::vector<CLAPParameterInfo> modulatable;
+    auto allParams = getAllParameters();
+
+    for (const auto& param : allParams)
+    {
+        if (param.isModulatable)
+            modulatable.push_back(param);
+    }
+
+    return modulatable;
+}
+
+void CLAPPluginInstance::processWithModulation(juce::AudioBuffer<float>& buffer,
+                                                juce::MidiBuffer& midiMessages,
+                                                const std::vector<ModulationEvent>& modEvents)
+{
+    if (!plugin || !activated)
+        return;
+
+    // Build modulation events for this process block
+    pendingModEvents.clear();
+    pendingModEvents.reserve(modEvents.size());
+
+    for (const auto& modEvent : modEvents)
+    {
+        clap_event_param_mod_t event;
+        event.header.size = sizeof(clap_event_param_mod_t);
+        event.header.time = modEvent.sampleOffset;
+        event.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+        event.header.type = CLAP_EVENT_PARAM_MOD;
+        event.header.flags = 0;
+
+        event.param_id = modEvent.paramId;
+        event.cookie = nullptr;  // Could cache for performance
+        event.note_id = -1;      // Global modulation (not per-note)
+        event.port_index = -1;
+        event.channel = -1;
+        event.key = -1;
+        event.amount = modEvent.amount;
+
+        pendingModEvents.push_back(event);
+    }
+
+    // Sort events by time (CLAP requires this)
+    std::sort(pendingModEvents.begin(), pendingModEvents.end(),
+        [](const clap_event_param_mod_t& a, const clap_event_param_mod_t& b) {
+            return a.header.time < b.header.time;
+        });
+
+    // Now process as normal - the event callbacks will return our modulation events
+    process(buffer, midiMessages);
+
+    // Clear for next block
+    pendingModEvents.clear();
 }
 
 // ============================================================================

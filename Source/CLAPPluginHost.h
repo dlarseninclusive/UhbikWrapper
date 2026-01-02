@@ -52,6 +52,23 @@ private:
     void attachPluginGui();
 };
 
+// Information about a CLAP parameter (for modulation targets)
+struct CLAPParameterInfo
+{
+    clap_id id = 0;
+    juce::String name;
+    juce::String module;
+    double minValue = 0.0;
+    double maxValue = 1.0;
+    double defaultValue = 0.0;
+    bool isModulatable = false;
+    bool isAutomatable = false;
+    bool isStepped = false;
+    void* cookie = nullptr;  // For fast access
+
+    double getRange() const { return maxValue - minValue; }
+};
+
 // Description of a CLAP plugin (analogous to juce::PluginDescription)
 struct CLAPPluginDescription
 {
@@ -110,6 +127,25 @@ public:
     double getParameterValue(clap_id paramId) const;
     void setParameterValue(clap_id paramId, double value);
 
+    // Get all parameters with extended info
+    std::vector<CLAPParameterInfo> getAllParameters() const;
+
+    // Get only modulatable parameters
+    std::vector<CLAPParameterInfo> getModulatableParameters() const;
+
+    // Modulation event for process()
+    struct ModulationEvent
+    {
+        clap_id paramId;
+        double amount;          // Modulation amount (in parameter value units)
+        uint32_t sampleOffset;  // Sample offset within buffer
+    };
+
+    // Process with modulation events
+    void processWithModulation(juce::AudioBuffer<float>& buffer,
+                               juce::MidiBuffer& midiMessages,
+                               const std::vector<ModulationEvent>& modEvents);
+
 #if JUCE_LINUX
     // Poll registered FDs and dispatch events (called by CLAPEditorWindow timer)
     void pollFDs();
@@ -163,7 +199,10 @@ private:
     clap_input_events inputEvents;
     clap_output_events outputEvents;
 
-    // Static callbacks for empty event queues
+    // Dynamic event storage for modulation
+    std::vector<clap_event_param_mod_t> pendingModEvents;
+
+    // Static callbacks for event queues
     static uint32_t inputEventsSize(const clap_input_events* list);
     static const clap_event_header* inputEventsGet(const clap_input_events* list, uint32_t index);
     static bool outputEventsTryPush(const clap_output_events* list, const clap_event_header* event);

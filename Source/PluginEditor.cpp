@@ -114,6 +114,107 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     duckerHoldLabel.setFont(juce::Font(12.0f));
     addChildComponent(duckerHoldLabel);
 
+    // === Modulation Panel Setup ===
+    modPanelToggleButton.addListener(this);
+    modPanelToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff4466aa));
+    addAndMakeVisible(modPanelToggleButton);
+
+    // Tab buttons
+    modTabLFOsButton.addListener(this);
+    modTabLFOsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff5577bb));
+    addChildComponent(modTabLFOsButton);
+
+    modTabMatrixButton.addListener(this);
+    modTabMatrixButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff446699));
+    addChildComponent(modTabMatrixButton);
+
+    // LFO controls setup
+    const char* lfoNames[] = {"LFO 1", "LFO 2", "LFO 3", "LFO 4"};
+    for (int i = 0; i < 4; ++i)
+    {
+        auto& lfo = lfoControls[static_cast<size_t>(i)];
+
+        // Name label
+        lfo.nameLabel.setText(lfoNames[i], juce::dontSendNotification);
+        lfo.nameLabel.setJustificationType(juce::Justification::centred);
+        lfo.nameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addChildComponent(lfo.nameLabel);
+
+        // Rate slider (0.01 to 20 Hz)
+        lfo.rateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        lfo.rateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 45, 12);
+        lfo.rateSlider.setRange(0.01, 20.0, 0.01);
+        lfo.rateSlider.setSkewFactorFromMidPoint(1.0);
+        lfo.rateSlider.setValue(1.0);
+        lfo.rateSlider.setTextValueSuffix(" Hz");
+        lfo.rateSlider.addListener(this);
+        addChildComponent(lfo.rateSlider);
+        lfo.rateLabel.setJustificationType(juce::Justification::centred);
+        lfo.rateLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addChildComponent(lfo.rateLabel);
+
+        // Depth slider (0 to 100%)
+        lfo.depthSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        lfo.depthSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 45, 12);
+        lfo.depthSlider.setRange(0.0, 100.0, 1.0);
+        lfo.depthSlider.setValue(100.0);
+        lfo.depthSlider.setTextValueSuffix("%");
+        lfo.depthSlider.addListener(this);
+        addChildComponent(lfo.depthSlider);
+        lfo.depthLabel.setJustificationType(juce::Justification::centred);
+        lfo.depthLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+        addChildComponent(lfo.depthLabel);
+
+        // Waveform selector
+        lfo.waveformBox.addItem("Sine", 1);
+        lfo.waveformBox.addItem("Triangle", 2);
+        lfo.waveformBox.addItem("Saw", 3);
+        lfo.waveformBox.addItem("Square", 4);
+        lfo.waveformBox.addItem("S&H", 5);
+        lfo.waveformBox.setSelectedId(1);
+        lfo.waveformBox.addListener(this);
+        addChildComponent(lfo.waveformBox);
+    }
+
+    // Matrix controls
+    matrixSourceBox.addItem("LFO 1", 1);
+    matrixSourceBox.addItem("LFO 2", 2);
+    matrixSourceBox.addItem("LFO 3", 3);
+    matrixSourceBox.addItem("LFO 4", 4);
+    matrixSourceBox.setSelectedId(1);
+    addChildComponent(matrixSourceBox);
+
+    matrixSlotBox.setTextWhenNothingSelected("Select Slot...");
+    matrixSlotBox.addListener(this);
+    addChildComponent(matrixSlotBox);
+
+    matrixParamBox.setTextWhenNothingSelected("Select Parameter...");
+    addChildComponent(matrixParamBox);
+
+    matrixAmountSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    matrixAmountSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 20);
+    matrixAmountSlider.setRange(-100.0, 100.0, 1.0);
+    matrixAmountSlider.setValue(50.0);
+    matrixAmountSlider.setTextValueSuffix("%");
+    addChildComponent(matrixAmountSlider);
+
+    matrixAddButton.addListener(this);
+    matrixAddButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
+    addChildComponent(matrixAddButton);
+
+    matrixClearButton.addListener(this);
+    matrixClearButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffaa4444));
+    addChildComponent(matrixClearButton);
+
+    matrixRoutesLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addChildComponent(matrixRoutesLabel);
+
+    modRouteListModel = std::make_unique<ModRouteListModel>(*this);
+    matrixRoutesList.setModel(modRouteListModel.get());
+    matrixRoutesList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff1a1a1a));
+    matrixRoutesList.setRowHeight(20);
+    addChildComponent(matrixRoutesList);
+
     // Apply saved UI scale after a short delay (JUCE needs component to be fully ready)
     uiScale = audioProcessor.uiScale.load();
     if (uiScale != 1.0f)
@@ -142,6 +243,21 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     duckerAttackSlider.removeListener(this);
     duckerReleaseSlider.removeListener(this);
     duckerHoldSlider.removeListener(this);
+
+    // Modulation panel cleanup
+    modPanelToggleButton.removeListener(this);
+    modTabLFOsButton.removeListener(this);
+    modTabMatrixButton.removeListener(this);
+    matrixAddButton.removeListener(this);
+    matrixClearButton.removeListener(this);
+    matrixSlotBox.removeListener(this);
+    for (auto& lfo : lfoControls)
+    {
+        lfo.rateSlider.removeListener(this);
+        lfo.depthSlider.removeListener(this);
+        lfo.waveformBox.removeListener(this);
+    }
+
     editorWindowCache.clear();
     audioProcessor.closeAllCLAPEditors();
 }
@@ -203,6 +319,25 @@ void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
             pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification); // Reset selection
         }
     }
+    else if (comboBox == &matrixSlotBox)
+    {
+        populateMatrixParamBox();
+    }
+
+    // LFO waveform combo boxes
+    for (int i = 0; i < 4; ++i)
+    {
+        auto& lfo = lfoControls[static_cast<size_t>(i)];
+        if (comboBox == &lfo.waveformBox)
+        {
+            int waveId = lfo.waveformBox.getSelectedId();
+            if (waveId >= 1 && waveId <= 5)
+            {
+                audioProcessor.setLFOWaveform(i, static_cast<LFOWaveform>(waveId - 1));
+            }
+            return;
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
@@ -230,6 +365,50 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         audioProcessor.duckerEnabled.store(duckerEnableButton.getToggleState());
     }
+    // Modulation panel buttons
+    else if (button == &modPanelToggleButton)
+    {
+        modPanelExpanded = !modPanelExpanded;
+        updateModulationUI();
+        resized();
+    }
+    else if (button == &modTabLFOsButton)
+    {
+        currentModTab = ModTab::LFOs;
+        updateModTabButtons();
+        updateModulationUI();
+        resized();
+    }
+    else if (button == &modTabMatrixButton)
+    {
+        currentModTab = ModTab::Matrix;
+        updateModTabButtons();
+        populateMatrixSlotBox();
+        updateModulationUI();
+        resized();
+    }
+    else if (button == &matrixAddButton)
+    {
+        int lfoIndex = matrixSourceBox.getSelectedId() - 1;
+        int slotIndex = matrixSlotBox.getSelectedId() - 1;
+        int paramIndex = matrixParamBox.getSelectedId() - 1;
+        float amount = static_cast<float>(matrixAmountSlider.getValue()) / 100.0f;
+
+        if (slotIndex >= 0 && paramIndex >= 0)
+        {
+            auto params = audioProcessor.getModulatableParametersForSlot(slotIndex);
+            if (paramIndex < static_cast<int>(params.size()))
+            {
+                audioProcessor.addModulationRoute(lfoIndex, slotIndex, params[static_cast<size_t>(paramIndex)].id, amount);
+                refreshModRoutesList();
+            }
+        }
+    }
+    else if (button == &matrixClearButton)
+    {
+        audioProcessor.clearModulationRoutes();
+        refreshModRoutesList();
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
@@ -244,6 +423,22 @@ void UhbikWrapperAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
         audioProcessor.duckerReleaseMs.store(static_cast<float>(slider->getValue()));
     else if (slider == &duckerHoldSlider)
         audioProcessor.duckerHoldMs.store(static_cast<float>(slider->getValue()));
+
+    // LFO sliders
+    for (int i = 0; i < 4; ++i)
+    {
+        auto& lfo = lfoControls[static_cast<size_t>(i)];
+        if (slider == &lfo.rateSlider)
+        {
+            audioProcessor.setLFOFrequency(i, static_cast<float>(slider->getValue()));
+            return;
+        }
+        else if (slider == &lfo.depthSlider)
+        {
+            audioProcessor.setLFODepth(i, static_cast<float>(slider->getValue()) / 100.0f);
+            return;
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::updateDuckerUI()
@@ -264,6 +459,137 @@ void UhbikWrapperAudioProcessorEditor::updateDuckerUI()
 
     // Update toggle button text
     duckerToggleButton.setButtonText(duckerExpanded ? "DUCKER v" : "DUCKER >");
+}
+
+void UhbikWrapperAudioProcessorEditor::updateModulationUI()
+{
+    bool showLFOs = modPanelExpanded && (currentModTab == ModTab::LFOs);
+    bool showMatrix = modPanelExpanded && (currentModTab == ModTab::Matrix);
+
+    // Tab buttons
+    modTabLFOsButton.setVisible(modPanelExpanded);
+    modTabMatrixButton.setVisible(modPanelExpanded);
+
+    // LFO controls
+    for (auto& lfo : lfoControls)
+    {
+        lfo.nameLabel.setVisible(showLFOs);
+        lfo.rateSlider.setVisible(showLFOs);
+        lfo.rateLabel.setVisible(showLFOs);
+        lfo.depthSlider.setVisible(showLFOs);
+        lfo.depthLabel.setVisible(showLFOs);
+        lfo.waveformBox.setVisible(showLFOs);
+    }
+
+    // Matrix controls
+    matrixSourceBox.setVisible(showMatrix);
+    matrixSlotBox.setVisible(showMatrix);
+    matrixParamBox.setVisible(showMatrix);
+    matrixAmountSlider.setVisible(showMatrix);
+    matrixAddButton.setVisible(showMatrix);
+    matrixClearButton.setVisible(showMatrix);
+    matrixRoutesLabel.setVisible(showMatrix);
+    matrixRoutesList.setVisible(showMatrix);
+
+    // Update toggle button text
+    modPanelToggleButton.setButtonText(modPanelExpanded ? "MODULATION v" : "MODULATION >");
+
+    if (showMatrix)
+        refreshModRoutesList();
+}
+
+void UhbikWrapperAudioProcessorEditor::updateModTabButtons()
+{
+    // Highlight active tab
+    juce::Colour activeCol(0xff6688cc);
+    juce::Colour inactiveCol(0xff446699);
+
+    modTabLFOsButton.setColour(juce::TextButton::buttonColourId,
+        currentModTab == ModTab::LFOs ? activeCol : inactiveCol);
+    modTabMatrixButton.setColour(juce::TextButton::buttonColourId,
+        currentModTab == ModTab::Matrix ? activeCol : inactiveCol);
+}
+
+void UhbikWrapperAudioProcessorEditor::populateMatrixSlotBox()
+{
+    matrixSlotBox.clear();
+    int chainSize = audioProcessor.getChainSize();
+
+    for (int i = 0; i < chainSize; ++i)
+    {
+        auto& slot = audioProcessor.effectChain[static_cast<size_t>(i)];
+        if (slot.isCLAP())  // Only CLAP plugins support modulation
+        {
+            matrixSlotBox.addItem(slot.description.name, i + 1);
+        }
+    }
+
+    matrixParamBox.clear();
+}
+
+void UhbikWrapperAudioProcessorEditor::populateMatrixParamBox()
+{
+    matrixParamBox.clear();
+    int slotIndex = matrixSlotBox.getSelectedId() - 1;
+
+    if (slotIndex >= 0)
+    {
+        auto params = audioProcessor.getModulatableParametersForSlot(slotIndex);
+        int id = 1;
+        for (const auto& param : params)
+        {
+            matrixParamBox.addItem(param.name, id++);
+        }
+    }
+}
+
+void UhbikWrapperAudioProcessorEditor::refreshModRoutesList()
+{
+    matrixRoutesList.updateContent();
+    matrixRoutesList.repaint();
+}
+
+// ModRouteListModel implementation
+int UhbikWrapperAudioProcessorEditor::ModRouteListModel::getNumRows()
+{
+    return static_cast<int>(editor.audioProcessor.getModulationRoutes().size());
+}
+
+void UhbikWrapperAudioProcessorEditor::ModRouteListModel::paintListBoxItem(
+    int row, juce::Graphics& g, int w, int h, bool selected)
+{
+    const auto& routes = editor.audioProcessor.getModulationRoutes();
+    if (row < 0 || row >= static_cast<int>(routes.size()))
+        return;
+
+    const auto& route = routes[static_cast<size_t>(row)];
+
+    if (selected)
+        g.fillAll(juce::Colour(0xff3355aa));
+
+    g.setColour(juce::Colours::white);
+    g.setFont(12.0f);
+
+    juce::String text = "LFO " + juce::String(route.lfoIndex + 1) + " -> " +
+                        route.target.paramName + " (" +
+                        juce::String(static_cast<int>(route.amount * 100)) + "%)";
+
+    g.drawText(text, 5, 0, w - 30, h, juce::Justification::centredLeft);
+
+    // Draw X button for removal
+    g.setColour(juce::Colours::red);
+    g.drawText("X", w - 20, 0, 15, h, juce::Justification::centred);
+}
+
+void UhbikWrapperAudioProcessorEditor::ModRouteListModel::listBoxItemClicked(
+    int row, const juce::MouseEvent& e)
+{
+    // Check if click was on X button (right side)
+    if (e.x > editor.matrixRoutesList.getWidth() - 25)
+    {
+        editor.audioProcessor.removeModulationRoute(row);
+        editor.refreshModRoutesList();
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
@@ -519,11 +845,29 @@ void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
         g.fillEllipse(static_cast<float>(getWidth() - 11), static_cast<float>(y), 7.0f, 7.0f);
     }
 
-    // Ducker panel background (when expanded)
+    // Calculate panel heights
     int duckerHeaderHeight = 25;
     int duckerExpandedHeight = 100;
     int duckerHeight = duckerHeaderHeight + (duckerExpanded ? duckerExpandedHeight : 0);
+
+    int modHeaderHeight = 25;
+    int modExpandedHeight = 110;
+    int modHeight = modHeaderHeight + (modPanelExpanded ? modExpandedHeight : 0);
+
     int duckerY = getHeight() - 30 - duckerHeight;
+    int modY = duckerY - modHeight;
+
+    // Modulation panel background
+    // Header bar
+    g.setColour(juce::Colour(0xff2a4466));
+    g.fillRect(browserWidth, modY, getWidth() - browserWidth, modHeaderHeight);
+
+    if (modPanelExpanded)
+    {
+        // Panel background
+        g.setColour(juce::Colour(0xff1e2833));
+        g.fillRect(browserWidth, modY + modHeaderHeight, getWidth() - browserWidth, modExpandedHeight);
+    }
 
     // Ducker header bar
     g.setColour(juce::Colour(0xff333333));
@@ -720,6 +1064,83 @@ void UhbikWrapperAudioProcessorEditor::resized()
         // Hold
         duckerHoldLabel.setBounds(startX + spacing * 4, controlY, knobSize, labelHeight);
         duckerHoldSlider.setBounds(startX + spacing * 4, controlY + labelHeight, knobSize, knobSize);
+    }
+
+    // Modulation panel (collapsible, above ducker)
+    int modHeaderHeight = 25;
+    int modExpandedHeight = 110;
+    int modHeight = modHeaderHeight + (modPanelExpanded ? modExpandedHeight : 0);
+
+    auto modBounds = bounds.removeFromBottom(modHeight);
+
+    // Modulation toggle button (always visible)
+    modPanelToggleButton.setBounds(modBounds.getX() + 10, modBounds.getY(), 110, modHeaderHeight);
+
+    if (modPanelExpanded)
+    {
+        int tabY = modBounds.getY();
+        int tabWidth = 60;
+
+        // Tab buttons in header bar
+        modTabLFOsButton.setBounds(modBounds.getX() + 130, tabY, tabWidth, modHeaderHeight);
+        modTabMatrixButton.setBounds(modBounds.getX() + 195, tabY, tabWidth, modHeaderHeight);
+
+        int contentY = modBounds.getY() + modHeaderHeight + 5;
+        int contentWidth = modBounds.getWidth();
+
+        if (currentModTab == ModTab::LFOs)
+        {
+            // LFO tab layout - 4 LFOs horizontally
+            int lfoWidth = (contentWidth - 40) / 4;
+            int knobSize = 40;
+            int labelHeight = 14;
+
+            for (int i = 0; i < 4; ++i)
+            {
+                auto& lfo = lfoControls[static_cast<size_t>(i)];
+                int lfoX = modBounds.getX() + 20 + i * lfoWidth;
+
+                // Name label at top
+                lfo.nameLabel.setBounds(lfoX, contentY, lfoWidth - 10, labelHeight);
+
+                // Waveform selector
+                lfo.waveformBox.setBounds(lfoX, contentY + labelHeight + 2, lfoWidth - 10, 20);
+
+                // Rate knob
+                lfo.rateLabel.setBounds(lfoX, contentY + labelHeight + 26, knobSize, 12);
+                lfo.rateSlider.setBounds(lfoX, contentY + labelHeight + 38, knobSize, knobSize);
+
+                // Depth knob
+                lfo.depthLabel.setBounds(lfoX + knobSize + 5, contentY + labelHeight + 26, knobSize, 12);
+                lfo.depthSlider.setBounds(lfoX + knobSize + 5, contentY + labelHeight + 38, knobSize, knobSize);
+            }
+        }
+        else if (currentModTab == ModTab::Matrix)
+        {
+            // Matrix tab layout
+            int rowHeight = 24;
+            int labelWidth = 80;
+            int boxWidth = 150;
+            int startX = modBounds.getX() + 20;
+
+            // Row 1: Source and Slot
+            matrixSourceBox.setBounds(startX, contentY, boxWidth, rowHeight);
+            matrixSlotBox.setBounds(startX + boxWidth + 10, contentY, boxWidth, rowHeight);
+
+            // Row 2: Parameter and Amount
+            matrixParamBox.setBounds(startX, contentY + rowHeight + 5, boxWidth, rowHeight);
+            matrixAmountSlider.setBounds(startX + boxWidth + 10, contentY + rowHeight + 5, boxWidth, rowHeight);
+
+            // Row 3: Buttons
+            matrixAddButton.setBounds(startX, contentY + 2 * (rowHeight + 5), 80, rowHeight);
+            matrixClearButton.setBounds(startX + 90, contentY + 2 * (rowHeight + 5), 80, rowHeight);
+
+            // Routes list on right side
+            int listX = startX + 2 * boxWidth + 30;
+            int listWidth = contentWidth - listX - 20 + modBounds.getX();
+            matrixRoutesLabel.setBounds(listX, contentY, listWidth, 16);
+            matrixRoutesList.setBounds(listX, contentY + 18, listWidth, modExpandedHeight - 25);
+        }
     }
 
     // Rack rails

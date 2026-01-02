@@ -406,6 +406,117 @@ void UhbikWrapperAudioProcessor::closeAllCLAPEditors()
     }
 }
 
+// --- Modulation System Implementation ---
+
+void UhbikWrapperAudioProcessor::addModulationRoute(int lfoIndex, int slotIndex, clap_id paramId, float amount)
+{
+    if (lfoIndex < 0 || lfoIndex >= NUM_LFOS)
+        return;
+
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(effectChain.size()))
+        return;
+
+    // Only CLAP plugins support modulation
+    auto& slot = effectChain[static_cast<size_t>(slotIndex)];
+    if (!slot.isCLAP() || slot.clapPlugin == nullptr)
+        return;
+
+    // Find the parameter info
+    auto params = slot.clapPlugin->getModulatableParameters();
+    CLAPParameterInfo targetParam;
+    bool found = false;
+
+    for (const auto& param : params)
+    {
+        if (param.id == paramId)
+        {
+            targetParam = param;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        return;
+
+    ModulationRoute route;
+    route.lfoIndex = lfoIndex;
+    route.target.slotIndex = slotIndex;
+    route.target.paramId = paramId;
+    route.target.paramName = targetParam.name;
+    route.target.minValue = targetParam.minValue;
+    route.target.maxValue = targetParam.maxValue;
+    route.target.isModulatable = true;
+    route.amount = juce::jlimit(-1.0f, 1.0f, amount);
+    route.enabled = true;
+
+    {
+        const juce::SpinLock::ScopedLockType lock(modulationLock);
+        modulationRoutes.push_back(route);
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Added modulation: LFO" << lfoIndex << " -> " << targetParam.name << std::endl;
+
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::removeModulationRoute(int routeIndex)
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    if (routeIndex >= 0 && routeIndex < static_cast<int>(modulationRoutes.size()))
+    {
+        modulationRoutes.erase(modulationRoutes.begin() + routeIndex);
+        sendChangeMessage();
+    }
+}
+
+void UhbikWrapperAudioProcessor::clearModulationRoutes()
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    modulationRoutes.clear();
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::setModulationAmount(int routeIndex, float amount)
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    if (routeIndex >= 0 && routeIndex < static_cast<int>(modulationRoutes.size()))
+    {
+        modulationRoutes[static_cast<size_t>(routeIndex)].amount = juce::jlimit(-1.0f, 1.0f, amount);
+    }
+}
+
+std::vector<CLAPParameterInfo> UhbikWrapperAudioProcessor::getModulatableParametersForSlot(int slotIndex) const
+{
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(effectChain.size()))
+        return {};
+
+    const auto& slot = effectChain[static_cast<size_t>(slotIndex)];
+    if (!slot.isCLAP() || slot.clapPlugin == nullptr)
+        return {};
+
+    return slot.clapPlugin->getModulatableParameters();
+}
+
+void UhbikWrapperAudioProcessor::setLFOFrequency(int lfoIndex, float hz)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setFrequency(hz);
+}
+
+void UhbikWrapperAudioProcessor::setLFOWaveform(int lfoIndex, LFOWaveform waveform)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setWaveform(waveform);
+}
+
+void UhbikWrapperAudioProcessor::setLFODepth(int lfoIndex, float depth)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setDepth(depth);
+}
+
 const juce::String UhbikWrapperAudioProcessor::getName() const
 {
     return JucePlugin_Name;
@@ -473,6 +584,12 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     currentSampleRate = sampleRate;
     duckerEnvelope = 0.0f;
     duckerHoldCounter = 0.0f;
+
+    // Prepare LFOs
+    for (int i = 0; i < NUM_LFOS; ++i)
+    {
+        lfos[i].prepare(sampleRate);
+    }
 
     auto* wrapperSidechain = getBus(true, 1);
     bool wrapperHasSidechain = (wrapperSidechain != nullptr && wrapperSidechain->isEnabled());
@@ -687,7 +804,7 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             }
             else if (slot.isCLAP())
             {
-                // CLAP processing - pass stereo buffer
+                // CLAP processing - pass stereo buffer with modulation
                 if (slot.clapPlugin != nullptr && slot.clapPlugin->isActive() && numBufferChannels >= mainChannels)
                 {
                     static int clapProcessCount = 0;
@@ -696,9 +813,62 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         std::cerr << "[RACK] CLAP process #" << clapProcessCount << std::endl << std::flush;
                         clapProcessCount++;
                     }
+
                     float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
                     juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
-                    slot.clapPlugin->process(mainBuffer, midiMessages);
+
+                    // Get current slot index for modulation routing
+                    int currentSlotIndex = static_cast<int>(&slot - effectChain.data());
+
+                    // Generate modulation events for this slot
+                    std::vector<CLAPPluginInstance::ModulationEvent> modEvents;
+
+                    // Try to lock modulation routes - skip modulation if locked
+                    const juce::SpinLock::ScopedTryLockType modLock(modulationLock);
+                    if (modLock.isLocked())
+                    {
+                        // Process modulation at 64-sample granularity for smooth modulation
+                        constexpr int MOD_BLOCK_SIZE = 64;
+                        for (int sampleOffset = 0; sampleOffset < numSamples; sampleOffset += MOD_BLOCK_SIZE)
+                        {
+                            // Tick LFOs for this modulation block
+                            float lfoValues[NUM_LFOS];
+                            for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
+                                lfoValues[lfo] = lfos[lfo].tick();
+
+                            // Generate modulation events for routes targeting this slot
+                            for (const auto& route : modulationRoutes)
+                            {
+                                if (route.enabled && route.target.slotIndex == currentSlotIndex)
+                                {
+                                    // Calculate modulation amount in parameter value units
+                                    float lfoValue = lfoValues[route.lfoIndex];
+                                    double paramRange = route.target.maxValue - route.target.minValue;
+                                    double modAmount = lfoValue * route.amount * paramRange;
+
+                                    CLAPPluginInstance::ModulationEvent event;
+                                    event.paramId = route.target.paramId;
+                                    event.amount = modAmount;
+                                    event.sampleOffset = static_cast<uint32_t>(sampleOffset);
+                                    modEvents.push_back(event);
+                                }
+                            }
+
+                            // Advance LFOs by remaining samples in this block
+                            int samplesInBlock = juce::jmin(MOD_BLOCK_SIZE - 1, numSamples - sampleOffset - 1);
+                            for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
+                            {
+                                for (int s = 0; s < samplesInBlock; ++s)
+                                    lfos[lfo].tick();
+                            }
+                        }
+                    }
+
+                    // Process with modulation events
+                    if (modEvents.empty())
+                        slot.clapPlugin->process(mainBuffer, midiMessages);
+                    else
+                        slot.clapPlugin->processWithModulation(mainBuffer, midiMessages, modEvents);
                 }
             }
 
