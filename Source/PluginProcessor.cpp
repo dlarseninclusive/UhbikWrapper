@@ -47,8 +47,20 @@ UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
        apvts(*this, nullptr, "Parameters", createParameterLayout())
 #endif
 {
+    // Force immediate flush to see output before any crash
+    std::cerr << "[RACK] === CONSTRUCTOR START ===" << std::endl;
+    std::cerr.flush();
+
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
+
+    std::cerr << "[RACK] Scanning VST3..." << std::endl;
+    std::cerr.flush();
+
     scanForPlugins();
+
+    std::cerr << "[RACK] === CONSTRUCTOR DONE ===" << std::endl;
+    std::cerr.flush();
+
     ensurePresetsFolderExists();
 }
 
@@ -59,64 +71,108 @@ UhbikWrapperAudioProcessor::~UhbikWrapperAudioProcessor()
 
 void UhbikWrapperAudioProcessor::scanForPlugins()
 {
+    availablePlugins.clear();
+
+    // === Scan VST3 plugins ===
     juce::FileSearchPath searchPath;
 
 #if JUCE_WINDOWS
-    // Windows: C:\Program Files\Common Files\VST3
     searchPath.add(juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory)
         .getChildFile("Common Files").getChildFile("VST3"));
-    // Also user's local VST3 folder
     searchPath.add(juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("VST3"));
 #elif JUCE_MAC
-    // macOS: /Library/Audio/Plug-Ins/VST3 and ~/Library/Audio/Plug-Ins/VST3
     searchPath.add(juce::File("/Library/Audio/Plug-Ins/VST3"));
     searchPath.add(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
         .getChildFile("Library/Audio/Plug-Ins/VST3"));
 #else
-    // Linux: ~/.vst3
     searchPath.add(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
         .getChildFile(".vst3"));
 #endif
 
-    // Scan all paths
     for (int i = 0; i < searchPath.getNumPaths(); ++i)
     {
         auto vst3Dir = searchPath[i];
         if (!vst3Dir.exists())
-        {
-            DBG("VST3 directory not found: " + vst3Dir.getFullPathName());
             continue;
-        }
 
-        DBG("Scanning for plugins in: " + vst3Dir.getFullPathName());
+        DBG("Scanning VST3 in: " + vst3Dir.getFullPathName());
 
         for (auto* format : pluginFormatManager.getFormats())
         {
             juce::PluginDirectoryScanner scanner(
-                knownPluginList,
-                *format,
+                knownPluginList, *format,
                 juce::FileSearchPath(vst3Dir.getFullPathName()),
-                true,
-                juce::File(),
-                false
+                true, juce::File(), false
             );
 
             juce::String pluginName;
             while (scanner.scanNextFile(true, pluginName))
             {
-                DBG("Found plugin: " + pluginName);
+                DBG("Found VST3: " + pluginName);
             }
         }
     }
 
-    DBG("Total plugins found: " + juce::String(knownPluginList.getNumTypes()));
+    // Add VST3 plugins to unified list
+    for (const auto& vst3Desc : knownPluginList.getTypes())
+    {
+        UnifiedPluginDescription unified;
+        unified.format = UnifiedPluginDescription::Format::VST3;
+        unified.name = vst3Desc.name;
+        unified.pluginId = vst3Desc.uniqueId != 0 ? juce::String(vst3Desc.uniqueId) : vst3Desc.fileOrIdentifier;
+        unified.pluginPath = vst3Desc.fileOrIdentifier;
+        unified.vendor = vst3Desc.manufacturerName;
+        unified.isInstrument = vst3Desc.isInstrument;
+        unified.vst3Desc = vst3Desc;
+        availablePlugins.push_back(unified);
+    }
+
+    std::cerr << "[RACK] VST3 plugins found: " << knownPluginList.getNumTypes() << std::endl << std::flush;
+
+    // === Scan CLAP plugins ===
+    // Delay CLAP scan slightly to avoid conflicts with library loading during project restore
+    std::cerr << "[RACK] Deferring CLAP scan..." << std::endl;
+    std::cerr.flush();
+    juce::Timer::callAfterDelay(500, [this]() {
+        std::cerr << "[RACK] Starting deferred CLAP scan..." << std::endl;
+        std::cerr.flush();
+        clapScanner.clear();
+        clapScanner.scanDefaultLocations();
+        std::cerr << "[RACK] CLAP scan complete. Found: " << clapScanner.getPlugins().size() << std::endl;
+        std::cerr.flush();
+
+        // Add CLAP plugins to unified list
+        for (const auto& clapDesc : clapScanner.getPlugins())
+        {
+            if (clapDesc.isInstrument)
+                continue;
+            UnifiedPluginDescription unified;
+            unified.format = UnifiedPluginDescription::Format::CLAP;
+            unified.name = clapDesc.name + " (CLAP)";
+            unified.pluginId = clapDesc.pluginId;
+            unified.pluginPath = clapDesc.pluginPath;
+            unified.vendor = clapDesc.vendor;
+            unified.isInstrument = clapDesc.isInstrument;
+            unified.clapDesc = clapDesc;
+            availablePlugins.push_back(unified);
+        }
+        std::cerr << "[RACK] CLAP effects added. Total plugins: " << availablePlugins.size() << std::endl;
+        std::cerr.flush();
+
+        // Notify any listeners that the plugin list has changed
+        sendChangeMessage();
+    });
+
+    // VST3 plugins are available immediately, CLAP plugins will be added after delay
+    std::cerr << "[RACK] VST3 plugins available immediately: " << availablePlugins.size() << std::endl;
+    std::cerr.flush();
 }
 
 void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
 {
     if (debugLogging.load())
-        std::cerr << "[RACK] Adding plugin: " << desc.name << std::endl << std::flush;
+        std::cerr << "[RACK] Adding VST3 plugin: " << desc.name << std::endl << std::flush;
 
     juce::String errorMsg;
     auto plugin = pluginFormatManager.createPluginInstance(
@@ -137,20 +193,17 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
             std::cerr << "[RACK] Plugin has " << numInputBuses << " input buses, "
                       << numOutputBuses << " output buses" << std::endl << std::flush;
 
-        // Always enable sidechain on hosted plugins that support it
-        // We'll handle routing in processBlock based on whether wrapper has sidechain connected
         if (numInputBuses > 1)
         {
             auto* pluginSidechain = plugin->getBus(true, 1);
             if (pluginSidechain != nullptr)
             {
                 if (debugLogging.load())
-                    std::cerr << "[RACK] Enabling sidechain bus on hosted plugin (always enabled)" << std::endl << std::flush;
+                    std::cerr << "[RACK] Enabling sidechain bus on hosted plugin" << std::endl << std::flush;
                 pluginSidechain->enable(true);
             }
         }
 
-        // Log final channel counts
         if (debugLogging.load())
             std::cerr << "[RACK] Plugin total channels: "
                       << plugin->getTotalNumInputChannels() << " in, "
@@ -166,10 +219,16 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
             std::cerr << "[RACK] Plugin prepared successfully" << std::endl << std::flush;
 
         EffectSlot slot;
-        slot.plugin = std::move(plugin);
-        slot.description = desc;
+        slot.vst3Plugin = std::move(plugin);
+        slot.description.format = UnifiedPluginDescription::Format::VST3;
+        slot.description.name = desc.name;
+        slot.description.pluginId = desc.uniqueId != 0 ? juce::String(desc.uniqueId) : desc.fileOrIdentifier;
+        slot.description.pluginPath = desc.fileOrIdentifier;
+        slot.description.vendor = desc.manufacturerName;
+        slot.description.isInstrument = desc.isInstrument;
+        slot.description.vst3Desc = desc;
         slot.bypassed = false;
-        slot.ready.store(true);  // Mark as ready after prepareToPlay
+        slot.ready.store(true);
 
         {
             const juce::SpinLock::ScopedLockType lock(chainLock);
@@ -177,15 +236,72 @@ void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)
         }
 
         if (debugLogging.load())
-            std::cerr << "[RACK] Plugin added to chain. Chain size: " << effectChain.size() << std::endl << std::flush;
+            std::cerr << "[RACK] VST3 plugin added. Chain size: " << effectChain.size() << std::endl << std::flush;
     }
     else
     {
         if (debugLogging.load())
-            std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
+            std::cerr << "[RACK] Failed to create VST3 plugin: " << errorMsg << std::endl << std::flush;
     }
 
     sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::addPlugin(const CLAPPluginDescription& desc)
+{
+    if (debugLogging.load())
+        std::cerr << "[RACK] Adding CLAP plugin: " << desc.name << std::endl << std::flush;
+
+    auto clapPlugin = std::make_unique<CLAPPluginInstance>(desc);
+
+    if (!clapPlugin->load())
+    {
+        if (debugLogging.load())
+            std::cerr << "[RACK] Failed to load CLAP plugin" << std::endl << std::flush;
+        sendChangeMessage();
+        return;
+    }
+
+    double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+    int bs = getBlockSize() > 0 ? getBlockSize() : 512;
+
+    if (!clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
+    {
+        if (debugLogging.load())
+            std::cerr << "[RACK] Failed to activate CLAP plugin" << std::endl << std::flush;
+        sendChangeMessage();
+        return;
+    }
+
+    EffectSlot slot;
+    slot.clapPlugin = std::move(clapPlugin);
+    slot.description.format = UnifiedPluginDescription::Format::CLAP;
+    slot.description.name = desc.name;
+    slot.description.pluginId = desc.pluginId;
+    slot.description.pluginPath = desc.pluginPath;
+    slot.description.vendor = desc.vendor;
+    slot.description.isInstrument = desc.isInstrument;
+    slot.description.clapDesc = desc;
+    slot.bypassed = false;
+    slot.ready.store(true);
+
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        effectChain.push_back(std::move(slot));
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] CLAP plugin added. Chain size: " << effectChain.size() << std::endl << std::flush;
+
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::addPlugin(const UnifiedPluginDescription& desc)
+{
+    if (desc.format == UnifiedPluginDescription::Format::CLAP)
+        addPlugin(desc.clapDesc);
+    else
+        addPlugin(desc.vst3Desc);
 }
 
 void UhbikWrapperAudioProcessor::removePlugin(int index)
@@ -276,9 +392,246 @@ juce::AudioPluginInstance* UhbikWrapperAudioProcessor::getPluginAt(int index)
 {
     if (index >= 0 && index < static_cast<int>(effectChain.size()))
     {
-        return effectChain[static_cast<size_t>(index)].plugin.get();
+        return effectChain[static_cast<size_t>(index)].vst3Plugin.get();
     }
     return nullptr;
+}
+
+void UhbikWrapperAudioProcessor::closeAllCLAPEditors()
+{
+    for (auto& slot : effectChain)
+    {
+        if (slot.clapPlugin)
+            slot.clapPlugin->closeEditor();
+    }
+}
+
+// --- Modulation System Implementation ---
+
+void UhbikWrapperAudioProcessor::addModulationRoute(ModSourceType sourceType, int sourceIndex, int slotIndex, clap_id paramId, float amount)
+{
+    // Validate source index based on type
+    switch (sourceType)
+    {
+        case ModSourceType::LFO:
+            if (sourceIndex < 0 || sourceIndex >= NUM_LFOS) return;
+            break;
+        case ModSourceType::Envelope:
+            if (sourceIndex < 0 || sourceIndex >= NUM_ENVELOPES) return;
+            break;
+        case ModSourceType::StepSequencer:
+            if (sourceIndex < 0 || sourceIndex >= NUM_STEP_SEQS) return;
+            break;
+        case ModSourceType::Macro:
+            if (sourceIndex < 0 || sourceIndex >= NUM_MACROS) return;
+            break;
+    }
+
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(effectChain.size()))
+        return;
+
+    // Only CLAP plugins support modulation
+    auto& slot = effectChain[static_cast<size_t>(slotIndex)];
+    if (!slot.isCLAP() || slot.clapPlugin == nullptr)
+        return;
+
+    // Find the parameter info
+    auto params = slot.clapPlugin->getModulatableParameters();
+    CLAPParameterInfo targetParam;
+    bool found = false;
+
+    for (const auto& param : params)
+    {
+        if (param.id == paramId)
+        {
+            targetParam = param;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        return;
+
+    ModulationRoute route;
+    route.sourceType = sourceType;
+    route.sourceIndex = sourceIndex;
+    route.target.slotIndex = slotIndex;
+    route.target.paramId = paramId;
+    route.target.paramName = targetParam.name;
+    route.target.minValue = targetParam.minValue;
+    route.target.maxValue = targetParam.maxValue;
+    route.target.isModulatable = true;
+    route.amount = juce::jlimit(-1.0f, 1.0f, amount);
+    route.enabled = true;
+
+    {
+        const juce::SpinLock::ScopedLockType lock(modulationLock);
+        modulationRoutes.push_back(route);
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Added modulation: " << route.getSourceName() << " -> " << targetParam.name << std::endl;
+
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::removeModulationRoute(int routeIndex)
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    if (routeIndex >= 0 && routeIndex < static_cast<int>(modulationRoutes.size()))
+    {
+        modulationRoutes.erase(modulationRoutes.begin() + routeIndex);
+        sendChangeMessage();
+    }
+}
+
+void UhbikWrapperAudioProcessor::clearModulationRoutes()
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    modulationRoutes.clear();
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::setModulationAmount(int routeIndex, float amount)
+{
+    const juce::SpinLock::ScopedLockType lock(modulationLock);
+    if (routeIndex >= 0 && routeIndex < static_cast<int>(modulationRoutes.size()))
+    {
+        modulationRoutes[static_cast<size_t>(routeIndex)].amount = juce::jlimit(-1.0f, 1.0f, amount);
+    }
+}
+
+std::vector<CLAPParameterInfo> UhbikWrapperAudioProcessor::getModulatableParametersForSlot(int slotIndex) const
+{
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(effectChain.size()))
+        return {};
+
+    const auto& slot = effectChain[static_cast<size_t>(slotIndex)];
+    if (!slot.isCLAP() || slot.clapPlugin == nullptr)
+        return {};
+
+    return slot.clapPlugin->getModulatableParameters();
+}
+
+void UhbikWrapperAudioProcessor::setLFOFrequency(int lfoIndex, float hz)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setFrequency(hz);
+}
+
+void UhbikWrapperAudioProcessor::setLFOWaveform(int lfoIndex, LFOWaveform waveform)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setWaveform(waveform);
+}
+
+void UhbikWrapperAudioProcessor::setLFODepth(int lfoIndex, float depth)
+{
+    if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
+        lfos[lfoIndex].setDepth(depth);
+}
+
+// Envelope control methods
+void UhbikWrapperAudioProcessor::setEnvelopeAttack(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setAttack(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeDecay(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setDecay(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeSustain(int envIndex, float level)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setSustain(level);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeRelease(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setRelease(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeDepth(int envIndex, float depth)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setDepth(depth);
+}
+
+void UhbikWrapperAudioProcessor::triggerEnvelope(int envIndex)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].trigger();
+}
+
+void UhbikWrapperAudioProcessor::releaseEnvelope(int envIndex)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].release();
+}
+
+// Step Sequencer control methods
+void UhbikWrapperAudioProcessor::setStepSeqStep(int seqIndex, int stepIndex, float value)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setStep(stepIndex, value);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqNumSteps(int seqIndex, int numSteps)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setNumSteps(numSteps);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqDivision(int seqIndex, int division)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setDivision(division);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqGlide(int seqIndex, float glide)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setGlide(glide);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqDepth(int seqIndex, float depth)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setDepth(depth);
+}
+
+float UhbikWrapperAudioProcessor::getModulationSourceValue(ModSourceType type, int index) const
+{
+    switch (type)
+    {
+        case ModSourceType::LFO:
+            if (index >= 0 && index < NUM_LFOS)
+                return 0.0f; // LFOs are processed sample-by-sample, can't get instant value
+            break;
+        case ModSourceType::Envelope:
+            if (index >= 0 && index < NUM_ENVELOPES)
+                return envelopes[index].getCurrentValue();
+            break;
+        case ModSourceType::StepSequencer:
+            if (index >= 0 && index < NUM_STEP_SEQS)
+                return 0.0f; // Step seqs processed sample-by-sample
+            break;
+        case ModSourceType::Macro:
+            if (index >= 0 && index < NUM_MACROS)
+            {
+                juce::String macroId = "macro" + juce::String(index + 1);
+                if (auto* param = apvts.getRawParameterValue(macroId))
+                    return param->load();
+            }
+            break;
+    }
+    return 0.0f;
 }
 
 const juce::String UhbikWrapperAudioProcessor::getName() const
@@ -349,18 +702,47 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     duckerEnvelope = 0.0f;
     duckerHoldCounter = 0.0f;
 
+    // Prepare LFOs
+    for (int i = 0; i < NUM_LFOS; ++i)
+    {
+        lfos[i].prepare(sampleRate);
+    }
+
+    // Prepare Envelopes
+    for (int i = 0; i < NUM_ENVELOPES; ++i)
+    {
+        envelopes[i].prepare(sampleRate);
+    }
+
+    // Prepare Step Sequencers
+    for (int i = 0; i < NUM_STEP_SEQS; ++i)
+    {
+        stepSequencers[i].prepare(sampleRate);
+    }
+
     auto* wrapperSidechain = getBus(true, 1);
     bool wrapperHasSidechain = (wrapperSidechain != nullptr && wrapperSidechain->isEnabled());
 
-    if (debugLogging.load())
-        std::cerr << "[RACK] prepareToPlay: SR=" << sampleRate << " BS=" << samplesPerBlock
-                  << " sidechain=" << (wrapperHasSidechain ? "CONNECTED" : "not connected") << std::endl << std::flush;
+    // Always log prepareToPlay for debugging
+    std::cerr << "[RACK] prepareToPlay: SR=" << sampleRate << " BS=" << samplesPerBlock
+              << " sidechain=" << (wrapperHasSidechain ? "CONNECTED" : "not connected") << std::endl;
+    std::cerr.flush();
 
     for (auto& slot : effectChain)
     {
-        if (slot.plugin != nullptr)
+        if (slot.vst3Plugin != nullptr)
         {
-            slot.plugin->prepareToPlay(sampleRate, samplesPerBlock);
+            slot.vst3Plugin->prepareToPlay(sampleRate, samplesPerBlock);
+        }
+        else if (slot.clapPlugin != nullptr)
+        {
+            // CLAP plugins were already activated during addPlugin,
+            // but we may need to re-activate with new settings
+            if (slot.clapPlugin->isActive())
+            {
+                slot.clapPlugin->deactivate();
+            }
+            slot.clapPlugin->activate(sampleRate, 1, static_cast<uint32_t>(samplesPerBlock));
         }
     }
 }
@@ -370,9 +752,13 @@ void UhbikWrapperAudioProcessor::releaseResources()
     const juce::SpinLock::ScopedLockType lock(chainLock);
     for (auto& slot : effectChain)
     {
-        if (slot.plugin != nullptr)
+        if (slot.vst3Plugin != nullptr)
         {
-            slot.plugin->releaseResources();
+            slot.vst3Plugin->releaseResources();
+        }
+        else if (slot.clapPlugin != nullptr)
+        {
+            slot.clapPlugin->deactivate();
         }
     }
 }
@@ -405,6 +791,13 @@ bool UhbikWrapperAudioProcessor::isBusesLayoutSupported (const BusesLayout& layo
 
 void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    static int processCallCount = 0;
+    if (processCallCount < 5)
+    {
+        std::cerr << "[RACK] processBlock #" << processCallCount << " samples=" << buffer.getNumSamples() << std::endl << std::flush;
+        processCallCount++;
+    }
+
     juce::ScopedNoDenormals noDenormals;
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
@@ -463,7 +856,7 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (auto& slot : effectChain)
     {
-        if (slot.plugin != nullptr && slot.ready.load() && !slot.bypassed)
+        if (slot.hasPlugin() && slot.ready.load() && !slot.bypassed)
         {
             // Get per-slot mixing parameters
             float slotInputGain = juce::Decibels::decibelsToGain(slot.inputGainDb.load());
@@ -497,42 +890,152 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 slot.inputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
             }
 
-            int pluginInputChannels = slot.plugin->getTotalNumInputChannels();
-
-            if (pluginInputChannels <= mainChannels)
+            // Process either VST3 or CLAP plugin
+            if (slot.isVST3())
             {
-                // Plugin doesn't use sidechain - pass main channels only
-                if (numBufferChannels >= mainChannels)
+                int pluginInputChannels = slot.vst3Plugin->getTotalNumInputChannels();
+
+                if (pluginInputChannels <= mainChannels)
                 {
-                    float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
-                    juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
-                    slot.plugin->processBlock(mainBuffer, midiMessages);
+                    // Plugin doesn't use sidechain - pass main channels only
+                    if (numBufferChannels >= mainChannels)
+                    {
+                        float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
+                        juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
+                        slot.vst3Plugin->processBlock(mainBuffer, midiMessages);
+                    }
+                }
+                else if (hasSidechainInput && numBufferChannels >= 4)
+                {
+                    // Plugin uses sidechain and we have sidechain input - pass full buffer
+                    slot.vst3Plugin->processBlock(buffer, midiMessages);
+                }
+                else
+                {
+                    // Plugin uses sidechain but wrapper doesn't have sidechain connected
+                    // Create a 4-channel buffer with main audio + silent sidechain
+                    juce::AudioBuffer<float> pluginBuffer(4, numSamples);
+
+                    // Copy main channels
+                    pluginBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples);
+                    pluginBuffer.copyFrom(1, 0, buffer, 1, 0, numSamples);
+
+                    // Clear sidechain channels (silence)
+                    pluginBuffer.clear(2, 0, numSamples);
+                    pluginBuffer.clear(3, 0, numSamples);
+
+                    slot.vst3Plugin->processBlock(pluginBuffer, midiMessages);
+
+                    // Copy processed main channels back
+                    buffer.copyFrom(0, 0, pluginBuffer, 0, 0, numSamples);
+                    buffer.copyFrom(1, 0, pluginBuffer, 1, 0, numSamples);
                 }
             }
-            else if (hasSidechainInput && numBufferChannels >= 4)
+            else if (slot.isCLAP())
             {
-                // Plugin uses sidechain and we have sidechain input - pass full buffer
-                slot.plugin->processBlock(buffer, midiMessages);
-            }
-            else
-            {
-                // Plugin uses sidechain but wrapper doesn't have sidechain connected
-                // Create a 4-channel buffer with main audio + silent sidechain
-                juce::AudioBuffer<float> pluginBuffer(4, numSamples);
+                // CLAP processing - pass stereo buffer with modulation
+                if (slot.clapPlugin != nullptr && slot.clapPlugin->isActive() && numBufferChannels >= mainChannels)
+                {
+                    static int clapProcessCount = 0;
+                    if (clapProcessCount < 3)
+                    {
+                        std::cerr << "[RACK] CLAP process #" << clapProcessCount << std::endl << std::flush;
+                        clapProcessCount++;
+                    }
 
-                // Copy main channels
-                pluginBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples);
-                pluginBuffer.copyFrom(1, 0, buffer, 1, 0, numSamples);
+                    float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
+                    juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
 
-                // Clear sidechain channels (silence)
-                pluginBuffer.clear(2, 0, numSamples);
-                pluginBuffer.clear(3, 0, numSamples);
+                    // Get current slot index for modulation routing
+                    int currentSlotIndex = static_cast<int>(&slot - effectChain.data());
 
-                slot.plugin->processBlock(pluginBuffer, midiMessages);
+                    // Generate modulation events for this slot
+                    std::vector<CLAPPluginInstance::ModulationEvent> modEvents;
 
-                // Copy processed main channels back
-                buffer.copyFrom(0, 0, pluginBuffer, 0, 0, numSamples);
-                buffer.copyFrom(1, 0, pluginBuffer, 1, 0, numSamples);
+                    // Try to lock modulation routes - skip modulation if locked
+                    const juce::SpinLock::ScopedTryLockType modLock(modulationLock);
+                    if (modLock.isLocked())
+                    {
+                        // Process modulation at 64-sample granularity for smooth modulation
+                        constexpr int MOD_BLOCK_SIZE = 64;
+                        for (int sampleOffset = 0; sampleOffset < numSamples; sampleOffset += MOD_BLOCK_SIZE)
+                        {
+                            // Tick all modulation sources for this block
+                            float lfoValues[NUM_LFOS];
+                            for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
+                                lfoValues[lfo] = lfos[lfo].tick();
+
+                            float envValues[NUM_ENVELOPES];
+                            for (int env = 0; env < NUM_ENVELOPES; ++env)
+                                envValues[env] = envelopes[env].tick();
+
+                            float seqValues[NUM_STEP_SEQS];
+                            for (int seq = 0; seq < NUM_STEP_SEQS; ++seq)
+                                seqValues[seq] = stepSequencers[seq].process();
+
+                            // Generate modulation events for routes targeting this slot
+                            for (const auto& route : modulationRoutes)
+                            {
+                                if (route.enabled && route.target.slotIndex == currentSlotIndex)
+                                {
+                                    // Get modulation value based on source type
+                                    float modValue = 0.0f;
+                                    switch (route.sourceType)
+                                    {
+                                        case ModSourceType::LFO:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_LFOS)
+                                                modValue = lfoValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::Envelope:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_ENVELOPES)
+                                                modValue = envValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::StepSequencer:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_STEP_SEQS)
+                                                modValue = seqValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::Macro:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_MACROS)
+                                            {
+                                                juce::String macroId = "macro" + juce::String(route.sourceIndex + 1);
+                                                if (auto* param = apvts.getRawParameterValue(macroId))
+                                                    modValue = (param->load() * 2.0f - 1.0f); // Convert 0-1 to bipolar
+                                            }
+                                            break;
+                                    }
+
+                                    // Calculate modulation amount in parameter value units
+                                    double paramRange = route.target.maxValue - route.target.minValue;
+                                    double modAmount = modValue * route.amount * paramRange;
+
+                                    CLAPPluginInstance::ModulationEvent event;
+                                    event.paramId = route.target.paramId;
+                                    event.amount = modAmount;
+                                    event.sampleOffset = static_cast<uint32_t>(sampleOffset);
+                                    modEvents.push_back(event);
+                                }
+                            }
+
+                            // Advance all modulation sources by remaining samples in this block
+                            int samplesInBlock = juce::jmin(MOD_BLOCK_SIZE - 1, numSamples - sampleOffset - 1);
+                            for (int s = 0; s < samplesInBlock; ++s)
+                            {
+                                for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
+                                    lfos[lfo].tick();
+                                for (int env = 0; env < NUM_ENVELOPES; ++env)
+                                    envelopes[env].tick();
+                                for (int seq = 0; seq < NUM_STEP_SEQS; ++seq)
+                                    stepSequencers[seq].process();
+                            }
+                        }
+                    }
+
+                    // Process with modulation events
+                    if (modEvents.empty())
+                        slot.clapPlugin->process(mainBuffer, midiMessages);
+                    else
+                        slot.clapPlugin->processWithModulation(mainBuffer, midiMessages, modEvents);
+                }
             }
 
             // Apply per-slot output gain
@@ -707,21 +1210,52 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
         slotState.setProperty("outputGainDb", slot.outputGainDb.load(), nullptr);
         slotState.setProperty("mixPercent", slot.mixPercent.load(), nullptr);
 
-        auto descXml = slot.description.createXml();
-        if (descXml != nullptr)
-        {
-            slotState.setProperty("description", descXml->toString(), nullptr);
-            if (debugLogging.load())
-                std::cerr << "[RACK] Saving slot " << i << ": " << slot.description.name << std::endl << std::flush;
-        }
+        // Save format type
+        slotState.setProperty("format", slot.description.format == UnifiedPluginDescription::Format::CLAP ? "CLAP" : "VST3", nullptr);
 
-        if (slot.plugin != nullptr)
+        if (slot.isVST3())
         {
-            juce::MemoryBlock pluginState;
-            slot.plugin->getStateInformation(pluginState);
-            slotState.setProperty("pluginState", pluginState.toBase64Encoding(), nullptr);
+            // VST3: Save PluginDescription XML
+            auto descXml = slot.description.vst3Desc.createXml();
+            if (descXml != nullptr)
+            {
+                slotState.setProperty("description", descXml->toString(), nullptr);
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Saving VST3 slot " << i << ": " << slot.description.name << std::endl << std::flush;
+            }
+
+            if (slot.vst3Plugin != nullptr)
+            {
+                juce::MemoryBlock pluginState;
+                slot.vst3Plugin->getStateInformation(pluginState);
+                slotState.setProperty("pluginState", pluginState.toBase64Encoding(), nullptr);
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Saved VST3 state size: " << pluginState.getSize() << std::endl << std::flush;
+            }
+        }
+        else if (slot.isCLAP())
+        {
+            // CLAP: Save CLAPPluginDescription fields
+            slotState.setProperty("clapPluginId", slot.description.clapDesc.pluginId, nullptr);
+            slotState.setProperty("clapPluginPath", slot.description.clapDesc.pluginPath, nullptr);
+            slotState.setProperty("clapVendor", slot.description.clapDesc.vendor, nullptr);
+            slotState.setProperty("clapName", slot.description.clapDesc.name, nullptr);
+            slotState.setProperty("clapVersion", slot.description.clapDesc.version, nullptr);
+
             if (debugLogging.load())
-                std::cerr << "[RACK] Saved plugin state size: " << pluginState.getSize() << std::endl << std::flush;
+                std::cerr << "[RACK] Saving CLAP slot " << i << ": " << slot.description.name << std::endl << std::flush;
+
+            if (slot.clapPlugin != nullptr)
+            {
+                juce::MemoryBlock clapState;
+                slot.clapPlugin->getState(clapState);
+                if (clapState.getSize() > 0)
+                {
+                    slotState.setProperty("pluginState", clapState.toBase64Encoding(), nullptr);
+                    if (debugLogging.load())
+                        std::cerr << "[RACK] Saved CLAP state size: " << clapState.getSize() << std::endl << std::flush;
+                }
+            }
         }
 
         state.addChild(slotState, -1, nullptr);
@@ -738,8 +1272,8 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
 
 void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (debugLogging.load())
-        std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
+    // Always log restore start to debug crashes
+    std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
 
     if (data == nullptr || sizeInBytes == 0)
     {
@@ -798,78 +1332,142 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
             continue;
 
         juce::String pluginName = slotState.getProperty("pluginName", "Unknown");
+        juce::String format = slotState.getProperty("format", "VST3").toString();
+
         if (debugLogging.load())
-            std::cerr << "[RACK] Restoring slot " << i << ": " << pluginName << std::endl << std::flush;
+            std::cerr << "[RACK] Restoring " << format << " slot " << i << ": " << pluginName << std::endl << std::flush;
 
-        juce::String descXmlStr = slotState.getProperty("description").toString();
-        auto descElement = juce::XmlDocument::parse(descXmlStr);
-        if (descElement == nullptr)
+        double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        int bs = getBlockSize() > 0 ? getBlockSize() : 512;
+
+        if (format == "CLAP")
         {
-            if (debugLogging.load())
-                std::cerr << "[RACK] Failed to parse plugin description XML" << std::endl << std::flush;
-            continue;
-        }
+            // Restore CLAP plugin
+            std::cerr << "[RACK] Restoring CLAP plugin..." << std::endl << std::flush;
 
-        juce::PluginDescription desc;
-        desc.loadFromXml(*descElement);
+            CLAPPluginDescription clapDesc;
+            clapDesc.pluginId = slotState.getProperty("clapPluginId", "").toString();
+            clapDesc.pluginPath = slotState.getProperty("clapPluginPath", "").toString();
+            clapDesc.vendor = slotState.getProperty("clapVendor", "").toString();
+            clapDesc.name = slotState.getProperty("clapName", "").toString();
+            clapDesc.version = slotState.getProperty("clapVersion", "").toString();
 
-        juce::String errorMsg;
-        auto plugin = pluginFormatManager.createPluginInstance(
-            desc,
-            getSampleRate() > 0 ? getSampleRate() : 44100.0,
-            getBlockSize() > 0 ? getBlockSize() : 512,
-            errorMsg
-        );
+            std::cerr << "[RACK] CLAP desc: " << clapDesc.name << " path=" << clapDesc.pluginPath << std::endl << std::flush;
 
-        if (plugin != nullptr)
-        {
-            // Always enable sidechain on hosted plugins that support it
-            int numInputBuses = plugin->getBusCount(true);
-            if (numInputBuses > 1)
+            auto clapPlugin = std::make_unique<CLAPPluginInstance>(clapDesc);
+            std::cerr << "[RACK] CLAP instance created, loading..." << std::endl << std::flush;
+
+            bool loaded = clapPlugin->load();
+            std::cerr << "[RACK] CLAP load result: " << (loaded ? "OK" : "FAILED") << std::endl << std::flush;
+
+            if (loaded && clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
             {
-                auto* pluginSidechain = plugin->getBus(true, 1);
-                if (pluginSidechain != nullptr)
+                // Restore CLAP state
+                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
+                if (pluginStateBase64.isNotEmpty())
                 {
+                    juce::MemoryBlock pluginStateData;
+                    pluginStateData.fromBase64Encoding(pluginStateBase64);
+                    clapPlugin->setState(pluginStateData.getData(), pluginStateData.getSize());
                     if (debugLogging.load())
-                        std::cerr << "[RACK] Enabling sidechain bus during restore (always enabled)" << std::endl << std::flush;
-                    pluginSidechain->enable(true);
+                        std::cerr << "[RACK] Restored CLAP state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
                 }
-            }
 
-            plugin->prepareToPlay(
-                getSampleRate() > 0 ? getSampleRate() : 44100.0,
-                getBlockSize() > 0 ? getBlockSize() : 512
-            );
+                EffectSlot slot;
+                slot.clapPlugin = std::move(clapPlugin);
+                slot.description.format = UnifiedPluginDescription::Format::CLAP;
+                slot.description.name = clapDesc.name;
+                slot.description.pluginId = clapDesc.pluginId;
+                slot.description.pluginPath = clapDesc.pluginPath;
+                slot.description.vendor = clapDesc.vendor;
+                slot.description.clapDesc = clapDesc;
+                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
+                slot.ready.store(true);
 
-            juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
-            if (pluginStateBase64.isNotEmpty())
-            {
-                juce::MemoryBlock pluginStateData;
-                pluginStateData.fromBase64Encoding(pluginStateBase64);
-                plugin->setStateInformation(pluginStateData.getData(), static_cast<int>(pluginStateData.getSize()));
+                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
+                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
+                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
+
+                newChain.push_back(std::move(slot));
                 if (debugLogging.load())
-                    std::cerr << "[RACK] Restored plugin state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
+                    std::cerr << "[RACK] CLAP plugin restored successfully" << std::endl << std::flush;
             }
-
-            EffectSlot slot;
-            slot.plugin = std::move(plugin);
-            slot.description = desc;
-            slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
-            slot.ready.store(true);  // Mark as ready after prepareToPlay
-
-            // Restore per-slot mixing parameters
-            slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
-            slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
-            slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
-
-            newChain.push_back(std::move(slot));
-            if (debugLogging.load())
-                std::cerr << "[RACK] Plugin restored successfully" << std::endl << std::flush;
+            else
+            {
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Failed to load/activate CLAP plugin" << std::endl << std::flush;
+            }
         }
         else
         {
-            if (debugLogging.load())
-                std::cerr << "[RACK] Failed to create plugin: " << errorMsg << std::endl << std::flush;
+            // Restore VST3 plugin
+            juce::String descXmlStr = slotState.getProperty("description").toString();
+            auto descElement = juce::XmlDocument::parse(descXmlStr);
+            if (descElement == nullptr)
+            {
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Failed to parse VST3 plugin description XML" << std::endl << std::flush;
+                continue;
+            }
+
+            juce::PluginDescription desc;
+            desc.loadFromXml(*descElement);
+
+            juce::String errorMsg;
+            auto plugin = pluginFormatManager.createPluginInstance(desc, sr, bs, errorMsg);
+
+            if (plugin != nullptr)
+            {
+                // Always enable sidechain on hosted plugins that support it
+                int numInputBuses = plugin->getBusCount(true);
+                if (numInputBuses > 1)
+                {
+                    auto* pluginSidechain = plugin->getBus(true, 1);
+                    if (pluginSidechain != nullptr)
+                    {
+                        if (debugLogging.load())
+                            std::cerr << "[RACK] Enabling sidechain bus during restore" << std::endl << std::flush;
+                        pluginSidechain->enable(true);
+                    }
+                }
+
+                plugin->prepareToPlay(sr, bs);
+
+                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
+                if (pluginStateBase64.isNotEmpty())
+                {
+                    juce::MemoryBlock pluginStateData;
+                    pluginStateData.fromBase64Encoding(pluginStateBase64);
+                    plugin->setStateInformation(pluginStateData.getData(), static_cast<int>(pluginStateData.getSize()));
+                    if (debugLogging.load())
+                        std::cerr << "[RACK] Restored VST3 state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
+                }
+
+                EffectSlot slot;
+                slot.vst3Plugin = std::move(plugin);
+                slot.description.format = UnifiedPluginDescription::Format::VST3;
+                slot.description.name = desc.name;
+                slot.description.pluginId = desc.uniqueId != 0 ? juce::String(desc.uniqueId) : desc.fileOrIdentifier;
+                slot.description.pluginPath = desc.fileOrIdentifier;
+                slot.description.vendor = desc.manufacturerName;
+                slot.description.isInstrument = desc.isInstrument;
+                slot.description.vst3Desc = desc;
+                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
+                slot.ready.store(true);
+
+                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
+                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
+                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
+
+                newChain.push_back(std::move(slot));
+                if (debugLogging.load())
+                    std::cerr << "[RACK] VST3 plugin restored successfully" << std::endl << std::flush;
+            }
+            else
+            {
+                if (debugLogging.load())
+                    std::cerr << "[RACK] Failed to create VST3 plugin: " << errorMsg << std::endl << std::flush;
+            }
         }
     }
 

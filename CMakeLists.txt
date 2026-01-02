@@ -12,6 +12,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(juce)
 
 # Import CLAP JUCE extensions for CLAP plugin format support
+# This also includes the CLAP SDK and clap-helpers which we use for hosting
 FetchContent_Declare(
     clap-juce-extensions
     GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
@@ -43,13 +44,15 @@ juce_add_plugin(UhbikWrapper
     PRODUCT_NAME "UhbikWrapper"
 )
 
-# CLAP format export disabled due to sidechain bus compatibility issues
-# with clap-juce-extensions. VST3 works fine.
-# clap_juce_extensions_plugin(
-#     TARGET UhbikWrapper
-#     CLAP_ID "com.inclusiveaudio.uhbikwrapper"
-#     CLAP_FEATURES audio-effect utility
-# )
+# CLAP format export - re-enabled for testing
+# Note: May have sidechain bus compatibility issues in some hosts
+clap_juce_extensions_plugin(
+    TARGET UhbikWrapper
+    CLAP_ID "com.inclusiveaudio.uhbikwrapper"
+    CLAP_FEATURES audio-effect utility
+    CLAP_MANUAL_URL "https://github.com/davelarsen58/UhbikWrapper"
+    CLAP_SUPPORT_URL "https://github.com/davelarsen58/UhbikWrapper/issues"
+)
 
 target_sources(UhbikWrapper PRIVATE
     Source/PluginProcessor.cpp
@@ -60,6 +63,8 @@ target_sources(UhbikWrapper PRIVATE
     Source/EffectSlot.h
     Source/PresetBrowser.cpp
     Source/PresetBrowser.h
+    Source/CLAPPluginHost.cpp
+    Source/CLAPPluginHost.h
 )
 
 target_compile_definitions(UhbikWrapper PUBLIC
@@ -68,6 +73,11 @@ target_compile_definitions(UhbikWrapper PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_PLUGINHOST_VST3=1
 )
+
+# Find X11 for CLAP GUI hosting on Linux
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+endif()
 
 target_link_libraries(UhbikWrapper PRIVATE
     # Essential JUCE modules for a plugin that hosts other plugins
@@ -82,4 +92,15 @@ target_link_libraries(UhbikWrapper PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
+    # CLAP hosting support (from clap-juce-extensions bundled libraries)
+    clap
+    clap-helpers
+    # X11 for CLAP plugin GUI embedding on Linux
+    $<$<PLATFORM_ID:Linux>:${X11_LIBRARIES}>
+)
+
+# Add CLAP include directories (from clap-juce-extensions)
+target_include_directories(UhbikWrapper PRIVATE
+    ${clap-juce-extensions_SOURCE_DIR}/clap-libs/clap/include
+    ${clap-juce-extensions_SOURCE_DIR}/clap-libs/clap-helpers/include
 )

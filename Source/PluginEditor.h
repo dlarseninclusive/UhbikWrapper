@@ -54,7 +54,7 @@ private:
     juce::Viewport chainViewport;
     juce::Component chainContainer;
     std::vector<std::unique_ptr<EffectSlotComponent>> slotComponents;
-    std::vector<juce::PluginDescription> effectPlugins; // Effects only (no instruments)
+    std::vector<UnifiedPluginDescription> effectPlugins; // Effects only (no instruments) - VST3 and CLAP
 
     juce::ComboBox pluginSelector;
     juce::TextButton addButton{"+"};
@@ -77,6 +77,7 @@ private:
         void closeButtonPressed() override { setVisible(false); }
     };
     std::map<juce::AudioPluginInstance*, std::unique_ptr<EditorWindow>> editorWindowCache;
+    // Note: CLAP editor windows are managed by CLAPPluginInstance::editorWindow
 
     void savePreset();
     void loadPreset();
@@ -98,6 +99,81 @@ private:
     juce::Label duckerAttackLabel{"", "Attack"};
     juce::Label duckerReleaseLabel{"", "Release"};
     juce::Label duckerHoldLabel{"", "Hold"};
+
+    // Modulation panel (collapsible, tabbed)
+    bool modPanelExpanded = false;
+    juce::TextButton modPanelToggleButton{"MODULATION"};
+
+    // Tab buttons
+    enum class ModTab { LFOs, Envs, StepSeqs, Matrix };
+    ModTab currentModTab = ModTab::LFOs;
+    juce::TextButton modTabLFOsButton{"LFOs"};
+    juce::TextButton modTabEnvsButton{"Envs"};
+    juce::TextButton modTabSeqsButton{"Seqs"};
+    juce::TextButton modTabMatrixButton{"Matrix"};
+
+    // LFO controls (4 LFOs)
+    struct LFOControls {
+        juce::Slider rateSlider;
+        juce::Slider depthSlider;
+        juce::ComboBox waveformBox;
+        juce::Label rateLabel{"", "Rate"};
+        juce::Label depthLabel{"", "Depth"};
+        juce::Label nameLabel{"", "LFO 1"};
+    };
+    std::array<LFOControls, 4> lfoControls;
+
+    // Envelope controls (2 envelopes)
+    struct EnvControls {
+        juce::Slider attackSlider;
+        juce::Slider decaySlider;
+        juce::Slider sustainSlider;
+        juce::Slider releaseSlider;
+        juce::Slider depthSlider;
+        juce::TextButton triggerButton{"Trigger"};
+        juce::Label nameLabel{"", "Env 1"};
+    };
+    std::array<EnvControls, 2> envControls;
+
+    // Step Sequencer controls (2 sequencers)
+    struct SeqControls {
+        std::array<juce::Slider, 16> stepSliders;  // 16 visible steps
+        juce::ComboBox divisionBox;
+        juce::Slider glideSlider;
+        juce::Slider depthSlider;
+        juce::ComboBox patternBox;
+        juce::Label nameLabel{"", "Seq 1"};
+    };
+    std::array<SeqControls, 2> seqControls;
+    int currentSeqIndex = 0;  // Which sequencer is displayed
+
+    // Matrix controls
+    juce::ComboBox matrixSourceBox;      // Select LFO source
+    juce::ComboBox matrixSlotBox;        // Select effect slot
+    juce::ComboBox matrixParamBox;       // Select parameter
+    juce::Slider matrixAmountSlider;     // Modulation amount
+    juce::TextButton matrixAddButton{"Add Route"};
+    juce::TextButton matrixClearButton{"Clear All"};
+    juce::Label matrixRoutesLabel{"", "Active Routes:"};
+    juce::ListBox matrixRoutesList;
+
+    // Route list model
+    class ModRouteListModel : public juce::ListBoxModel {
+    public:
+        ModRouteListModel(UhbikWrapperAudioProcessorEditor& e) : editor(e) {}
+        int getNumRows() override;
+        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
+        void listBoxItemClicked(int row, const juce::MouseEvent&) override;
+    private:
+        UhbikWrapperAudioProcessorEditor& editor;
+    };
+    std::unique_ptr<ModRouteListModel> modRouteListModel;
+
+    void updateModulationUI();
+    void updateModTabButtons();
+    void populateMatrixSlotBox();
+    void populateMatrixParamBox();
+    void refreshModRoutesList();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessorEditor)
 };
