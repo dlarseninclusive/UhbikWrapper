@@ -27,6 +27,14 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     pluginSelector.addListener(this);
     addAndMakeVisible(pluginSelector);
 
+    // Format filter dropdown
+    formatFilter.addItem("All", 1);
+    formatFilter.addItem("CLAP", 2);
+    formatFilter.addItem("VST3", 3);
+    formatFilter.setSelectedId(1);
+    formatFilter.addListener(this);
+    addAndMakeVisible(formatFilter);
+
     addButton.addListener(this);
     addButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
     addAndMakeVisible(addButton);
@@ -383,6 +391,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
 {
     audioProcessor.removeChangeListener(this);
     pluginSelector.removeListener(this);
+    formatFilter.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
     duckerToggleButton.removeListener(this);
@@ -487,6 +496,11 @@ void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
             audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
             pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification); // Reset selection
         }
+    }
+    else if (comboBox == &formatFilter)
+    {
+        // Re-populate the plugin selector based on the filter
+        populatePluginSelector();
     }
     else if (comboBox == &matrixSlotBox)
     {
@@ -940,21 +954,35 @@ void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
     // Get unified list of all available plugins (VST3 + CLAP)
     const auto& allPlugins = audioProcessor.getAvailablePlugins();
 
-    // Filter for effects only (no instruments)
+    // Get current filter selection (1=All, 2=CLAP, 3=VST3)
+    int filterSelection = formatFilter.getSelectedId();
+
+    // Filter for effects only (no instruments) and by format
     for (const auto& desc : allPlugins)
     {
-        if (!desc.isInstrument)
-        {
-            effectPlugins.push_back(desc);
-        }
+        if (desc.isInstrument)
+            continue;
+
+        // Apply format filter
+        if (filterSelection == 2 && desc.format != UnifiedPluginDescription::Format::CLAP)
+            continue;
+        if (filterSelection == 3 && desc.format != UnifiedPluginDescription::Format::VST3)
+            continue;
+
+        effectPlugins.push_back(desc);
     }
 
-    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (VST3 + CLAP)" << std::endl << std::flush;
+    const char* filterName = (filterSelection == 2) ? "CLAP" : (filterSelection == 3) ? "VST3" : "All";
+    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (filter: " << filterName << ")" << std::endl << std::flush;
 
     int id = 1;
     for (const auto& desc : effectPlugins)
     {
-        pluginSelector.addItem(desc.name, id++);
+        // Add format suffix for "All" view
+        juce::String displayName = desc.name;
+        if (filterSelection == 1)  // "All" - show format to distinguish duplicates
+            displayName += " [" + desc.getFormatName() + "]";
+        pluginSelector.addItem(displayName, id++);
     }
 }
 
@@ -1351,12 +1379,14 @@ void UhbikWrapperAudioProcessorEditor::resized()
     auto headerBounds = bounds.removeFromTop(50);
     int buttonY = 11;  // Center buttons vertically in 50px header
 
-    // Right side: [selector] [+]
+    // Right side: [filter] [selector] [+]
     int addBtnWidth = 40;
-    int selectorWidth = juce::jmin(200, bounds.getWidth() / 3);
+    int filterWidth = 60;
+    int selectorWidth = juce::jmin(180, bounds.getWidth() / 3);
 
     addButton.setBounds(getWidth() - addBtnWidth - 15, buttonY, addBtnWidth, 28);
     pluginSelector.setBounds(addButton.getX() - selectorWidth - 6, buttonY, selectorWidth, 28);
+    formatFilter.setBounds(pluginSelector.getX() - filterWidth - 6, buttonY, filterWidth, 28);
 
     // View menu button after title (EFFECT RACK is at browserWidth + 15, ~140px wide)
     viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
