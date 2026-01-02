@@ -125,6 +125,15 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LFO)
 };
 
+// Modulation source types
+enum class ModSourceType
+{
+    LFO,
+    Envelope,
+    StepSequencer,
+    Macro
+};
+
 // Modulation target - identifies a parameter in a slot
 struct ModulationTarget
 {
@@ -138,13 +147,26 @@ struct ModulationTarget
     bool isValid() const { return slotIndex >= 0 && isModulatable; }
 };
 
-// A modulation routing (LFO -> Parameter)
+// A modulation routing (Source -> Parameter)
 struct ModulationRoute
 {
-    int lfoIndex = 0;               // Which LFO (0-3)
+    ModSourceType sourceType = ModSourceType::LFO;
+    int sourceIndex = 0;            // Which LFO/Envelope/StepSeq (0-3)
     ModulationTarget target;
     float amount = 0.0f;            // Modulation amount (-1 to +1, scaled to param range)
     bool enabled = true;
 
     bool isValid() const { return target.isValid() && enabled; }
+
+    juce::String getSourceName() const
+    {
+        switch (sourceType)
+        {
+            case ModSourceType::LFO: return "LFO " + juce::String(sourceIndex + 1);
+            case ModSourceType::Envelope: return "Env " + juce::String(sourceIndex + 1);
+            case ModSourceType::StepSequencer: return "Seq " + juce::String(sourceIndex + 1);
+            case ModSourceType::Macro: return "Macro " + juce::String(sourceIndex + 1);
+            default: return "Unknown";
+        }
+    }
 };

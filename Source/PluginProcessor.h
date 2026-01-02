@@ -4,6 +4,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "CLAPPluginHost.h"
 #include "LFO.h"
+#include "Envelope.h"
+#include "StepSequencer.h"
 
 // Unified plugin description that works for both VST3 and CLAP
 struct UnifiedPluginDescription
@@ -196,14 +198,19 @@ public:
 
     // --- Modulation System ---
     static constexpr int NUM_LFOS = 4;
+    static constexpr int NUM_ENVELOPES = 2;
+    static constexpr int NUM_STEP_SEQS = 2;
+
     LFO lfos[NUM_LFOS];
+    Envelope envelopes[NUM_ENVELOPES];
+    StepSequencer stepSequencers[NUM_STEP_SEQS];
 
     // Modulation routing
     std::vector<ModulationRoute> modulationRoutes;
     juce::SpinLock modulationLock;
 
     // Modulation management methods
-    void addModulationRoute(int lfoIndex, int slotIndex, clap_id paramId, float amount);
+    void addModulationRoute(ModSourceType sourceType, int sourceIndex, int slotIndex, clap_id paramId, float amount);
     void removeModulationRoute(int routeIndex);
     void clearModulationRoutes();
     void setModulationAmount(int routeIndex, float amount);
@@ -217,6 +224,27 @@ public:
     void setLFOWaveform(int lfoIndex, LFOWaveform waveform);
     void setLFODepth(int lfoIndex, float depth);
     LFO* getLFO(int index) { return (index >= 0 && index < NUM_LFOS) ? &lfos[index] : nullptr; }
+
+    // Envelope control
+    void setEnvelopeAttack(int envIndex, float ms);
+    void setEnvelopeDecay(int envIndex, float ms);
+    void setEnvelopeSustain(int envIndex, float level);
+    void setEnvelopeRelease(int envIndex, float ms);
+    void setEnvelopeDepth(int envIndex, float depth);
+    void triggerEnvelope(int envIndex);
+    void releaseEnvelope(int envIndex);
+    Envelope* getEnvelope(int index) { return (index >= 0 && index < NUM_ENVELOPES) ? &envelopes[index] : nullptr; }
+
+    // Step Sequencer control
+    void setStepSeqStep(int seqIndex, int stepIndex, float value);
+    void setStepSeqNumSteps(int seqIndex, int numSteps);
+    void setStepSeqDivision(int seqIndex, int division);
+    void setStepSeqGlide(int seqIndex, float glide);
+    void setStepSeqDepth(int seqIndex, float depth);
+    StepSequencer* getStepSequencer(int index) { return (index >= 0 && index < NUM_STEP_SEQS) ? &stepSequencers[index] : nullptr; }
+
+    // Get current modulation value from any source
+    float getModulationSourceValue(ModSourceType type, int index) const;
 
 private:
     // Ducker envelope state (audio thread only)

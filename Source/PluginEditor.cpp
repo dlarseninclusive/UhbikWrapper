@@ -124,6 +124,14 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     modTabLFOsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff5577bb));
     addChildComponent(modTabLFOsButton);
 
+    modTabEnvsButton.addListener(this);
+    modTabEnvsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff446699));
+    addChildComponent(modTabEnvsButton);
+
+    modTabSeqsButton.addListener(this);
+    modTabSeqsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff446699));
+    addChildComponent(modTabSeqsButton);
+
     modTabMatrixButton.addListener(this);
     modTabMatrixButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff446699));
     addChildComponent(modTabMatrixButton);
@@ -176,11 +184,152 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
         addChildComponent(lfo.waveformBox);
     }
 
-    // Matrix controls
+    // Envelope controls setup
+    const char* envNames[] = {"Env 1", "Env 2"};
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& env = envControls[static_cast<size_t>(i)];
+
+        env.nameLabel.setText(envNames[i], juce::dontSendNotification);
+        env.nameLabel.setJustificationType(juce::Justification::centred);
+        env.nameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addChildComponent(env.nameLabel);
+
+        // Attack slider (0.1 to 2000 ms)
+        env.attackSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        env.attackSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        env.attackSlider.setRange(0.1, 2000.0, 0.1);
+        env.attackSlider.setSkewFactorFromMidPoint(100.0);
+        env.attackSlider.setValue(10.0);
+        env.attackSlider.setTextValueSuffix("ms");
+        env.attackSlider.addListener(this);
+        addChildComponent(env.attackSlider);
+
+        // Decay slider
+        env.decaySlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        env.decaySlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        env.decaySlider.setRange(0.1, 2000.0, 0.1);
+        env.decaySlider.setSkewFactorFromMidPoint(100.0);
+        env.decaySlider.setValue(100.0);
+        env.decaySlider.setTextValueSuffix("ms");
+        env.decaySlider.addListener(this);
+        addChildComponent(env.decaySlider);
+
+        // Sustain slider (0-100%)
+        env.sustainSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        env.sustainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        env.sustainSlider.setRange(0.0, 100.0, 1.0);
+        env.sustainSlider.setValue(70.0);
+        env.sustainSlider.setTextValueSuffix("%");
+        env.sustainSlider.addListener(this);
+        addChildComponent(env.sustainSlider);
+
+        // Release slider
+        env.releaseSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        env.releaseSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        env.releaseSlider.setRange(0.1, 5000.0, 0.1);
+        env.releaseSlider.setSkewFactorFromMidPoint(200.0);
+        env.releaseSlider.setValue(200.0);
+        env.releaseSlider.setTextValueSuffix("ms");
+        env.releaseSlider.addListener(this);
+        addChildComponent(env.releaseSlider);
+
+        // Depth slider
+        env.depthSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        env.depthSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        env.depthSlider.setRange(0.0, 100.0, 1.0);
+        env.depthSlider.setValue(100.0);
+        env.depthSlider.setTextValueSuffix("%");
+        env.depthSlider.addListener(this);
+        addChildComponent(env.depthSlider);
+
+        // Trigger button
+        env.triggerButton.addListener(this);
+        env.triggerButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
+        addChildComponent(env.triggerButton);
+    }
+
+    // Step Sequencer controls setup
+    const char* seqNames[] = {"Seq 1", "Seq 2"};
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& seq = seqControls[static_cast<size_t>(i)];
+
+        seq.nameLabel.setText(seqNames[i], juce::dontSendNotification);
+        seq.nameLabel.setJustificationType(juce::Justification::centred);
+        seq.nameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addChildComponent(seq.nameLabel);
+
+        // Step sliders (16 steps)
+        for (int s = 0; s < 16; ++s)
+        {
+            auto& stepSlider = seq.stepSliders[static_cast<size_t>(s)];
+            stepSlider.setSliderStyle(juce::Slider::LinearBarVertical);
+            stepSlider.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+            stepSlider.setRange(0.0, 1.0, 0.01);
+            stepSlider.setValue(0.5);
+            stepSlider.addListener(this);
+            addChildComponent(stepSlider);
+        }
+
+        // Division selector
+        seq.divisionBox.addItem("1/1", 1);
+        seq.divisionBox.addItem("1/2", 2);
+        seq.divisionBox.addItem("1/4", 4);
+        seq.divisionBox.addItem("1/8", 8);
+        seq.divisionBox.addItem("1/16", 16);
+        seq.divisionBox.addItem("1/32", 32);
+        seq.divisionBox.setSelectedId(16);
+        seq.divisionBox.addListener(this);
+        addChildComponent(seq.divisionBox);
+
+        // Glide slider
+        seq.glideSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        seq.glideSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        seq.glideSlider.setRange(0.0, 100.0, 1.0);
+        seq.glideSlider.setValue(0.0);
+        seq.glideSlider.setTextValueSuffix("%");
+        seq.glideSlider.addListener(this);
+        addChildComponent(seq.glideSlider);
+
+        // Depth slider
+        seq.depthSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        seq.depthSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 40, 12);
+        seq.depthSlider.setRange(0.0, 100.0, 1.0);
+        seq.depthSlider.setValue(100.0);
+        seq.depthSlider.setTextValueSuffix("%");
+        seq.depthSlider.addListener(this);
+        addChildComponent(seq.depthSlider);
+
+        // Pattern presets
+        seq.patternBox.addItem("Ramp Up", 1);
+        seq.patternBox.addItem("Ramp Down", 2);
+        seq.patternBox.addItem("Triangle", 3);
+        seq.patternBox.addItem("Square", 4);
+        seq.patternBox.addItem("Random", 5);
+        seq.patternBox.addItem("Clear", 6);
+        seq.patternBox.setTextWhenNothingSelected("Pattern...");
+        seq.patternBox.addListener(this);
+        addChildComponent(seq.patternBox);
+    }
+
+    // Matrix controls - now with all source types
     matrixSourceBox.addItem("LFO 1", 1);
     matrixSourceBox.addItem("LFO 2", 2);
     matrixSourceBox.addItem("LFO 3", 3);
     matrixSourceBox.addItem("LFO 4", 4);
+    matrixSourceBox.addItem("Env 1", 5);
+    matrixSourceBox.addItem("Env 2", 6);
+    matrixSourceBox.addItem("Seq 1", 7);
+    matrixSourceBox.addItem("Seq 2", 8);
+    matrixSourceBox.addItem("Macro 1", 9);
+    matrixSourceBox.addItem("Macro 2", 10);
+    matrixSourceBox.addItem("Macro 3", 11);
+    matrixSourceBox.addItem("Macro 4", 12);
+    matrixSourceBox.addItem("Macro 5", 13);
+    matrixSourceBox.addItem("Macro 6", 14);
+    matrixSourceBox.addItem("Macro 7", 15);
+    matrixSourceBox.addItem("Macro 8", 16);
     matrixSourceBox.setSelectedId(1);
     addChildComponent(matrixSourceBox);
 
@@ -247,6 +396,8 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     // Modulation panel cleanup
     modPanelToggleButton.removeListener(this);
     modTabLFOsButton.removeListener(this);
+    modTabEnvsButton.removeListener(this);
+    modTabSeqsButton.removeListener(this);
     modTabMatrixButton.removeListener(this);
     matrixAddButton.removeListener(this);
     matrixClearButton.removeListener(this);
@@ -256,6 +407,24 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
         lfo.rateSlider.removeListener(this);
         lfo.depthSlider.removeListener(this);
         lfo.waveformBox.removeListener(this);
+    }
+    for (auto& env : envControls)
+    {
+        env.attackSlider.removeListener(this);
+        env.decaySlider.removeListener(this);
+        env.sustainSlider.removeListener(this);
+        env.releaseSlider.removeListener(this);
+        env.depthSlider.removeListener(this);
+        env.triggerButton.removeListener(this);
+    }
+    for (auto& seq : seqControls)
+    {
+        for (auto& step : seq.stepSliders)
+            step.removeListener(this);
+        seq.divisionBox.removeListener(this);
+        seq.glideSlider.removeListener(this);
+        seq.depthSlider.removeListener(this);
+        seq.patternBox.removeListener(this);
     }
 
     editorWindowCache.clear();
@@ -338,6 +507,39 @@ void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
             return;
         }
     }
+
+    // Step Sequencer combo boxes
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& seq = seqControls[static_cast<size_t>(i)];
+        if (comboBox == &seq.divisionBox)
+        {
+            int div = seq.divisionBox.getSelectedId();
+            audioProcessor.setStepSeqDivision(i, div);
+            return;
+        }
+        else if (comboBox == &seq.patternBox)
+        {
+            int patternId = seq.patternBox.getSelectedId();
+            if (patternId >= 1)
+            {
+                // Apply the pattern preset
+                auto* seqPtr = audioProcessor.getStepSequencer(i);
+                if (seqPtr != nullptr)
+                {
+                    seqPtr->setPattern(patternId - 1);
+                    // Update step sliders to reflect new pattern
+                    for (int s = 0; s < 16; ++s)
+                    {
+                        seq.stepSliders[static_cast<size_t>(s)].setValue(
+                            seqPtr->getStep(s), juce::dontSendNotification);
+                    }
+                }
+            }
+            seq.patternBox.setSelectedId(0, juce::dontSendNotification);  // Reset selection
+            return;
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
@@ -379,6 +581,20 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
         updateModulationUI();
         resized();
     }
+    else if (button == &modTabEnvsButton)
+    {
+        currentModTab = ModTab::Envs;
+        updateModTabButtons();
+        updateModulationUI();
+        resized();
+    }
+    else if (button == &modTabSeqsButton)
+    {
+        currentModTab = ModTab::StepSeqs;
+        updateModTabButtons();
+        updateModulationUI();
+        resized();
+    }
     else if (button == &modTabMatrixButton)
     {
         currentModTab = ModTab::Matrix;
@@ -387,19 +603,56 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
         updateModulationUI();
         resized();
     }
+    // Envelope trigger buttons
+    else if (button == &envControls[0].triggerButton)
+    {
+        audioProcessor.triggerEnvelope(0);
+    }
+    else if (button == &envControls[1].triggerButton)
+    {
+        audioProcessor.triggerEnvelope(1);
+    }
     else if (button == &matrixAddButton)
     {
-        int lfoIndex = matrixSourceBox.getSelectedId() - 1;
+        int sourceId = matrixSourceBox.getSelectedId();
         int slotIndex = matrixSlotBox.getSelectedId() - 1;
         int paramIndex = matrixParamBox.getSelectedId() - 1;
         float amount = static_cast<float>(matrixAmountSlider.getValue()) / 100.0f;
+
+        // Convert source selector ID to type and index
+        ModSourceType sourceType;
+        int sourceIndex;
+        if (sourceId >= 1 && sourceId <= 4)
+        {
+            sourceType = ModSourceType::LFO;
+            sourceIndex = sourceId - 1;
+        }
+        else if (sourceId >= 5 && sourceId <= 6)
+        {
+            sourceType = ModSourceType::Envelope;
+            sourceIndex = sourceId - 5;
+        }
+        else if (sourceId >= 7 && sourceId <= 8)
+        {
+            sourceType = ModSourceType::StepSequencer;
+            sourceIndex = sourceId - 7;
+        }
+        else if (sourceId >= 9 && sourceId <= 16)
+        {
+            sourceType = ModSourceType::Macro;
+            sourceIndex = sourceId - 9;
+        }
+        else
+        {
+            return;
+        }
 
         if (slotIndex >= 0 && paramIndex >= 0)
         {
             auto params = audioProcessor.getModulatableParametersForSlot(slotIndex);
             if (paramIndex < static_cast<int>(params.size()))
             {
-                audioProcessor.addModulationRoute(lfoIndex, slotIndex, params[static_cast<size_t>(paramIndex)].id, amount);
+                audioProcessor.addModulationRoute(sourceType, sourceIndex, slotIndex, params[static_cast<size_t>(paramIndex)].id, amount);
                 refreshModRoutesList();
             }
         }
@@ -439,6 +692,61 @@ void UhbikWrapperAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
             return;
         }
     }
+
+    // Envelope sliders
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& env = envControls[static_cast<size_t>(i)];
+        if (slider == &env.attackSlider)
+        {
+            audioProcessor.setEnvelopeAttack(i, static_cast<float>(slider->getValue()));
+            return;
+        }
+        else if (slider == &env.decaySlider)
+        {
+            audioProcessor.setEnvelopeDecay(i, static_cast<float>(slider->getValue()));
+            return;
+        }
+        else if (slider == &env.sustainSlider)
+        {
+            audioProcessor.setEnvelopeSustain(i, static_cast<float>(slider->getValue()) / 100.0f);
+            return;
+        }
+        else if (slider == &env.releaseSlider)
+        {
+            audioProcessor.setEnvelopeRelease(i, static_cast<float>(slider->getValue()));
+            return;
+        }
+        else if (slider == &env.depthSlider)
+        {
+            audioProcessor.setEnvelopeDepth(i, static_cast<float>(slider->getValue()) / 100.0f);
+            return;
+        }
+    }
+
+    // Step Sequencer sliders
+    for (int i = 0; i < 2; ++i)
+    {
+        auto& seq = seqControls[static_cast<size_t>(i)];
+        for (int s = 0; s < 16; ++s)
+        {
+            if (slider == &seq.stepSliders[static_cast<size_t>(s)])
+            {
+                audioProcessor.setStepSeqStep(i, s, static_cast<float>(slider->getValue()));
+                return;
+            }
+        }
+        if (slider == &seq.glideSlider)
+        {
+            audioProcessor.setStepSeqGlide(i, static_cast<float>(slider->getValue()) / 100.0f);
+            return;
+        }
+        else if (slider == &seq.depthSlider)
+        {
+            audioProcessor.setStepSeqDepth(i, static_cast<float>(slider->getValue()) / 100.0f);
+            return;
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::updateDuckerUI()
@@ -464,10 +772,14 @@ void UhbikWrapperAudioProcessorEditor::updateDuckerUI()
 void UhbikWrapperAudioProcessorEditor::updateModulationUI()
 {
     bool showLFOs = modPanelExpanded && (currentModTab == ModTab::LFOs);
+    bool showEnvs = modPanelExpanded && (currentModTab == ModTab::Envs);
+    bool showSeqs = modPanelExpanded && (currentModTab == ModTab::StepSeqs);
     bool showMatrix = modPanelExpanded && (currentModTab == ModTab::Matrix);
 
     // Tab buttons
     modTabLFOsButton.setVisible(modPanelExpanded);
+    modTabEnvsButton.setVisible(modPanelExpanded);
+    modTabSeqsButton.setVisible(modPanelExpanded);
     modTabMatrixButton.setVisible(modPanelExpanded);
 
     // LFO controls
@@ -479,6 +791,30 @@ void UhbikWrapperAudioProcessorEditor::updateModulationUI()
         lfo.depthSlider.setVisible(showLFOs);
         lfo.depthLabel.setVisible(showLFOs);
         lfo.waveformBox.setVisible(showLFOs);
+    }
+
+    // Envelope controls
+    for (auto& env : envControls)
+    {
+        env.nameLabel.setVisible(showEnvs);
+        env.attackSlider.setVisible(showEnvs);
+        env.decaySlider.setVisible(showEnvs);
+        env.sustainSlider.setVisible(showEnvs);
+        env.releaseSlider.setVisible(showEnvs);
+        env.depthSlider.setVisible(showEnvs);
+        env.triggerButton.setVisible(showEnvs);
+    }
+
+    // Step Sequencer controls
+    for (auto& seq : seqControls)
+    {
+        seq.nameLabel.setVisible(showSeqs);
+        for (auto& step : seq.stepSliders)
+            step.setVisible(showSeqs);
+        seq.divisionBox.setVisible(showSeqs);
+        seq.glideSlider.setVisible(showSeqs);
+        seq.depthSlider.setVisible(showSeqs);
+        seq.patternBox.setVisible(showSeqs);
     }
 
     // Matrix controls
@@ -506,6 +842,10 @@ void UhbikWrapperAudioProcessorEditor::updateModTabButtons()
 
     modTabLFOsButton.setColour(juce::TextButton::buttonColourId,
         currentModTab == ModTab::LFOs ? activeCol : inactiveCol);
+    modTabEnvsButton.setColour(juce::TextButton::buttonColourId,
+        currentModTab == ModTab::Envs ? activeCol : inactiveCol);
+    modTabSeqsButton.setColour(juce::TextButton::buttonColourId,
+        currentModTab == ModTab::StepSeqs ? activeCol : inactiveCol);
     modTabMatrixButton.setColour(juce::TextButton::buttonColourId,
         currentModTab == ModTab::Matrix ? activeCol : inactiveCol);
 }
@@ -570,7 +910,7 @@ void UhbikWrapperAudioProcessorEditor::ModRouteListModel::paintListBoxItem(
     g.setColour(juce::Colours::white);
     g.setFont(12.0f);
 
-    juce::String text = "LFO " + juce::String(route.lfoIndex + 1) + " -> " +
+    juce::String text = route.getSourceName() + " -> " +
                         route.target.paramName + " (" +
                         juce::String(static_cast<int>(route.amount * 100)) + "%)";
 
@@ -1079,11 +1419,13 @@ void UhbikWrapperAudioProcessorEditor::resized()
     if (modPanelExpanded)
     {
         int tabY = modBounds.getY();
-        int tabWidth = 60;
+        int tabWidth = 50;
 
         // Tab buttons in header bar
         modTabLFOsButton.setBounds(modBounds.getX() + 130, tabY, tabWidth, modHeaderHeight);
-        modTabMatrixButton.setBounds(modBounds.getX() + 195, tabY, tabWidth, modHeaderHeight);
+        modTabEnvsButton.setBounds(modBounds.getX() + 185, tabY, tabWidth, modHeaderHeight);
+        modTabSeqsButton.setBounds(modBounds.getX() + 240, tabY, tabWidth, modHeaderHeight);
+        modTabMatrixButton.setBounds(modBounds.getX() + 295, tabY, tabWidth + 10, modHeaderHeight);
 
         int contentY = modBounds.getY() + modHeaderHeight + 5;
         int contentWidth = modBounds.getWidth();
@@ -1115,11 +1457,71 @@ void UhbikWrapperAudioProcessorEditor::resized()
                 lfo.depthSlider.setBounds(lfoX + knobSize + 5, contentY + labelHeight + 38, knobSize, knobSize);
             }
         }
+        else if (currentModTab == ModTab::Envs)
+        {
+            // Envelope tab layout - 2 envelopes horizontally
+            int envWidth = (contentWidth - 40) / 2;
+            int knobSize = 35;
+            int labelHeight = 14;
+
+            for (int i = 0; i < 2; ++i)
+            {
+                auto& env = envControls[static_cast<size_t>(i)];
+                int envX = modBounds.getX() + 20 + i * envWidth;
+
+                // Name label at top
+                env.nameLabel.setBounds(envX, contentY, envWidth - 10, labelHeight);
+
+                // ADSR knobs in a row
+                int knobY = contentY + labelHeight + 2;
+                int knobSpacing = knobSize + 5;
+
+                env.attackSlider.setBounds(envX, knobY, knobSize, knobSize + 15);
+                env.decaySlider.setBounds(envX + knobSpacing, knobY, knobSize, knobSize + 15);
+                env.sustainSlider.setBounds(envX + knobSpacing * 2, knobY, knobSize, knobSize + 15);
+                env.releaseSlider.setBounds(envX + knobSpacing * 3, knobY, knobSize, knobSize + 15);
+                env.depthSlider.setBounds(envX + knobSpacing * 4, knobY, knobSize, knobSize + 15);
+
+                // Trigger button
+                env.triggerButton.setBounds(envX + knobSpacing * 5 + 5, knobY + 15, 50, 22);
+            }
+        }
+        else if (currentModTab == ModTab::StepSeqs)
+        {
+            // Step Sequencer tab layout - both sequencers, stacked
+            int seqHeight = (modExpandedHeight - 10) / 2;
+
+            for (int i = 0; i < 2; ++i)
+            {
+                auto& seq = seqControls[static_cast<size_t>(i)];
+                int seqY = contentY + i * seqHeight;
+
+                // Name label
+                seq.nameLabel.setBounds(modBounds.getX() + 10, seqY, 40, 16);
+
+                // 16 step sliders
+                int stepWidth = 20;
+                int stepHeight = seqHeight - 20;
+                int stepsStartX = modBounds.getX() + 55;
+
+                for (int s = 0; s < 16; ++s)
+                {
+                    seq.stepSliders[static_cast<size_t>(s)].setBounds(
+                        stepsStartX + s * (stepWidth + 2), seqY, stepWidth, stepHeight);
+                }
+
+                // Controls to the right of steps
+                int controlsX = stepsStartX + 16 * (stepWidth + 2) + 10;
+                seq.divisionBox.setBounds(controlsX, seqY, 60, 18);
+                seq.glideSlider.setBounds(controlsX + 65, seqY, 50, 35);
+                seq.depthSlider.setBounds(controlsX + 120, seqY, 50, 35);
+                seq.patternBox.setBounds(controlsX, seqY + 22, 60, 18);
+            }
+        }
         else if (currentModTab == ModTab::Matrix)
         {
             // Matrix tab layout
             int rowHeight = 24;
-            int labelWidth = 80;
             int boxWidth = 150;
             int startX = modBounds.getX() + 20;
 

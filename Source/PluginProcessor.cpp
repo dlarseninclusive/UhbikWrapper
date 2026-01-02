@@ -408,10 +408,24 @@ void UhbikWrapperAudioProcessor::closeAllCLAPEditors()
 
 // --- Modulation System Implementation ---
 
-void UhbikWrapperAudioProcessor::addModulationRoute(int lfoIndex, int slotIndex, clap_id paramId, float amount)
+void UhbikWrapperAudioProcessor::addModulationRoute(ModSourceType sourceType, int sourceIndex, int slotIndex, clap_id paramId, float amount)
 {
-    if (lfoIndex < 0 || lfoIndex >= NUM_LFOS)
-        return;
+    // Validate source index based on type
+    switch (sourceType)
+    {
+        case ModSourceType::LFO:
+            if (sourceIndex < 0 || sourceIndex >= NUM_LFOS) return;
+            break;
+        case ModSourceType::Envelope:
+            if (sourceIndex < 0 || sourceIndex >= NUM_ENVELOPES) return;
+            break;
+        case ModSourceType::StepSequencer:
+            if (sourceIndex < 0 || sourceIndex >= NUM_STEP_SEQS) return;
+            break;
+        case ModSourceType::Macro:
+            if (sourceIndex < 0 || sourceIndex >= NUM_MACROS) return;
+            break;
+    }
 
     if (slotIndex < 0 || slotIndex >= static_cast<int>(effectChain.size()))
         return;
@@ -440,7 +454,8 @@ void UhbikWrapperAudioProcessor::addModulationRoute(int lfoIndex, int slotIndex,
         return;
 
     ModulationRoute route;
-    route.lfoIndex = lfoIndex;
+    route.sourceType = sourceType;
+    route.sourceIndex = sourceIndex;
     route.target.slotIndex = slotIndex;
     route.target.paramId = paramId;
     route.target.paramName = targetParam.name;
@@ -456,7 +471,7 @@ void UhbikWrapperAudioProcessor::addModulationRoute(int lfoIndex, int slotIndex,
     }
 
     if (debugLogging.load())
-        std::cerr << "[RACK] Added modulation: LFO" << lfoIndex << " -> " << targetParam.name << std::endl;
+        std::cerr << "[RACK] Added modulation: " << route.getSourceName() << " -> " << targetParam.name << std::endl;
 
     sendChangeMessage();
 }
@@ -515,6 +530,108 @@ void UhbikWrapperAudioProcessor::setLFODepth(int lfoIndex, float depth)
 {
     if (lfoIndex >= 0 && lfoIndex < NUM_LFOS)
         lfos[lfoIndex].setDepth(depth);
+}
+
+// Envelope control methods
+void UhbikWrapperAudioProcessor::setEnvelopeAttack(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setAttack(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeDecay(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setDecay(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeSustain(int envIndex, float level)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setSustain(level);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeRelease(int envIndex, float ms)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setRelease(ms);
+}
+
+void UhbikWrapperAudioProcessor::setEnvelopeDepth(int envIndex, float depth)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].setDepth(depth);
+}
+
+void UhbikWrapperAudioProcessor::triggerEnvelope(int envIndex)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].trigger();
+}
+
+void UhbikWrapperAudioProcessor::releaseEnvelope(int envIndex)
+{
+    if (envIndex >= 0 && envIndex < NUM_ENVELOPES)
+        envelopes[envIndex].release();
+}
+
+// Step Sequencer control methods
+void UhbikWrapperAudioProcessor::setStepSeqStep(int seqIndex, int stepIndex, float value)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setStep(stepIndex, value);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqNumSteps(int seqIndex, int numSteps)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setNumSteps(numSteps);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqDivision(int seqIndex, int division)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setDivision(division);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqGlide(int seqIndex, float glide)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setGlide(glide);
+}
+
+void UhbikWrapperAudioProcessor::setStepSeqDepth(int seqIndex, float depth)
+{
+    if (seqIndex >= 0 && seqIndex < NUM_STEP_SEQS)
+        stepSequencers[seqIndex].setDepth(depth);
+}
+
+float UhbikWrapperAudioProcessor::getModulationSourceValue(ModSourceType type, int index) const
+{
+    switch (type)
+    {
+        case ModSourceType::LFO:
+            if (index >= 0 && index < NUM_LFOS)
+                return 0.0f; // LFOs are processed sample-by-sample, can't get instant value
+            break;
+        case ModSourceType::Envelope:
+            if (index >= 0 && index < NUM_ENVELOPES)
+                return envelopes[index].getCurrentValue();
+            break;
+        case ModSourceType::StepSequencer:
+            if (index >= 0 && index < NUM_STEP_SEQS)
+                return 0.0f; // Step seqs processed sample-by-sample
+            break;
+        case ModSourceType::Macro:
+            if (index >= 0 && index < NUM_MACROS)
+            {
+                juce::String macroId = "macro" + juce::String(index + 1);
+                if (auto* param = apvts.getRawParameterValue(macroId))
+                    return param->load();
+            }
+            break;
+    }
+    return 0.0f;
 }
 
 const juce::String UhbikWrapperAudioProcessor::getName() const
@@ -589,6 +706,18 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     for (int i = 0; i < NUM_LFOS; ++i)
     {
         lfos[i].prepare(sampleRate);
+    }
+
+    // Prepare Envelopes
+    for (int i = 0; i < NUM_ENVELOPES; ++i)
+    {
+        envelopes[i].prepare(sampleRate);
+    }
+
+    // Prepare Step Sequencers
+    for (int i = 0; i < NUM_STEP_SEQS; ++i)
+    {
+        stepSequencers[i].prepare(sampleRate);
     }
 
     auto* wrapperSidechain = getBus(true, 1);
@@ -831,20 +960,53 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         constexpr int MOD_BLOCK_SIZE = 64;
                         for (int sampleOffset = 0; sampleOffset < numSamples; sampleOffset += MOD_BLOCK_SIZE)
                         {
-                            // Tick LFOs for this modulation block
+                            // Tick all modulation sources for this block
                             float lfoValues[NUM_LFOS];
                             for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
                                 lfoValues[lfo] = lfos[lfo].tick();
+
+                            float envValues[NUM_ENVELOPES];
+                            for (int env = 0; env < NUM_ENVELOPES; ++env)
+                                envValues[env] = envelopes[env].tick();
+
+                            float seqValues[NUM_STEP_SEQS];
+                            for (int seq = 0; seq < NUM_STEP_SEQS; ++seq)
+                                seqValues[seq] = stepSequencers[seq].process();
 
                             // Generate modulation events for routes targeting this slot
                             for (const auto& route : modulationRoutes)
                             {
                                 if (route.enabled && route.target.slotIndex == currentSlotIndex)
                                 {
+                                    // Get modulation value based on source type
+                                    float modValue = 0.0f;
+                                    switch (route.sourceType)
+                                    {
+                                        case ModSourceType::LFO:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_LFOS)
+                                                modValue = lfoValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::Envelope:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_ENVELOPES)
+                                                modValue = envValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::StepSequencer:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_STEP_SEQS)
+                                                modValue = seqValues[route.sourceIndex];
+                                            break;
+                                        case ModSourceType::Macro:
+                                            if (route.sourceIndex >= 0 && route.sourceIndex < NUM_MACROS)
+                                            {
+                                                juce::String macroId = "macro" + juce::String(route.sourceIndex + 1);
+                                                if (auto* param = apvts.getRawParameterValue(macroId))
+                                                    modValue = (param->load() * 2.0f - 1.0f); // Convert 0-1 to bipolar
+                                            }
+                                            break;
+                                    }
+
                                     // Calculate modulation amount in parameter value units
-                                    float lfoValue = lfoValues[route.lfoIndex];
                                     double paramRange = route.target.maxValue - route.target.minValue;
-                                    double modAmount = lfoValue * route.amount * paramRange;
+                                    double modAmount = modValue * route.amount * paramRange;
 
                                     CLAPPluginInstance::ModulationEvent event;
                                     event.paramId = route.target.paramId;
@@ -854,12 +1016,16 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 }
                             }
 
-                            // Advance LFOs by remaining samples in this block
+                            // Advance all modulation sources by remaining samples in this block
                             int samplesInBlock = juce::jmin(MOD_BLOCK_SIZE - 1, numSamples - sampleOffset - 1);
-                            for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
+                            for (int s = 0; s < samplesInBlock; ++s)
                             {
-                                for (int s = 0; s < samplesInBlock; ++s)
+                                for (int lfo = 0; lfo < NUM_LFOS; ++lfo)
                                     lfos[lfo].tick();
+                                for (int env = 0; env < NUM_ENVELOPES; ++env)
+                                    envelopes[env].tick();
+                                for (int seq = 0; seq < NUM_STEP_SEQS; ++seq)
+                                    stepSequencers[seq].process();
                             }
                         }
                     }

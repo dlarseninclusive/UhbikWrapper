@@ -8,8 +8,8 @@ A lightweight, "Reason-style" VST3/CLAP wrapper designed specifically for hostin
 
 ## Features
 
-*   **Effect Chain**: Load unlimited VST3 effects in series
-*   **Plugin Scanner**: Automatically discovers all VST3 plugins in `~/.vst3/`
+*   **Effect Chain**: Load unlimited VST3 and CLAP effects in series
+*   **Plugin Scanner**: Automatically discovers VST3 plugins in `~/.vst3/` and CLAP plugins in `~/.clap/`
 *   **Rack-Style GUI**: Dark rack interface with orange header, inspired by hardware rack units
 *   **Per-Effect Controls**:
     - **Edit**: Opens the plugin's native GUI in a popup window
@@ -28,7 +28,14 @@ A lightweight, "Reason-style" VST3/CLAP wrapper designed specifically for hostin
 *   **DAW Parameters**: Exposed to host for automation:
     - Input/Output Gain (-24 to +24 dB)
     - Dry/Wet Mix (0-100%)
-    - 8 Macro knobs (for future parameter mapping)
+    - 8 Macro knobs (available as modulation sources)
+*   **Modulation System** (CLAP plugins only):
+    - 4 LFOs with 5 waveforms (Sine, Triangle, Saw, Square, Sample & Hold)
+    - 2 DAHDSR Envelopes with trigger buttons and exponential curves
+    - 2 Step Sequencers with up to 32 steps, tempo sync, glide, and preset patterns
+    - Mod Matrix for routing any source to any modulatable parameter
+    - 8 Macro knobs as modulation sources
+    - 64-sample modulation granularity for smooth automation
 *   **Preset System**: Save and load entire effect chains as `.uhbikchain` XML files
 *   **UI Zoom**: Scale the interface from 100% to 300% (persisted across sessions)
 *   **Sidechain Support**: Routes DAW sidechain input to hosted plugins
@@ -113,6 +120,11 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 *   `Source/PluginEditor.h`: Editor component declarations
 *   `Source/PresetBrowser.cpp`: Preset browser with metadata support
 *   `Source/EffectSlot.cpp`: Per-effect slot UI component
+*   `Source/CLAPPluginHost.cpp`: CLAP plugin hosting implementation
+*   `Source/CLAPPluginHost.h`: CLAP scanner, loader, and parameter modulation
+*   `Source/LFO.h`: LFO modulation source and routing structures
+*   `Source/Envelope.h`: DAHDSR envelope generator
+*   `Source/StepSequencer.h`: Step sequencer with tempo sync
 *   `CMakeLists.txt`: Build configuration that fetches JUCE automatically
 *   `setup.sh`: Automated dependency installer and builder
 
@@ -174,7 +186,7 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 ### Completed
 - [x] **Plugin Chaining**: Support loading multiple effects in series
 - [x] **Preset Serialization**: Save and load entire chain state with metadata
-- [x] **Plugin Scanner**: Discover available VST3 plugins
+- [x] **Plugin Scanner**: Discover available VST3 and CLAP plugins
 - [x] **Effect Reordering**: Move effects up/down in the chain
 - [x] **UI Zoom**: Scale interface for different screen sizes (persisted)
 - [x] **Preset Browser**: Folder-based preset organization with metadata
@@ -183,11 +195,14 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [x] **Sidechain Passthrough**: Routes DAW sidechain input to hosted plugins
 - [x] **DAW Parameters**: Input/output gain, dry/wet mix, 8 macro knobs exposed via APVTS
 - [x] **Cross-Platform Builds**: GitHub Actions CI for Linux, Windows, macOS
-- [x] **CLAP Format**: Open-source plugin format support via clap-juce-extensions
+- [x] **CLAP Format Export**: Wrapper available as VST3, CLAP, and AU (macOS)
+- [x] **CLAP Plugin Hosting**: Load CLAP plugins in addition to VST3
 - [x] **Plugin Availability Filter**: Highlight presets with missing plugins (orange + warning icon)
 - [x] **Per-Effect Mixing**: Input/output gain and wet/dry mix per effect slot
 - [x] **Level Meters**: Per-effect input/output meters and master meters in footer
 - [x] **Built-in Ducker**: Sidechain-triggered volume ducking with threshold, amount, attack, release, hold
+- [x] **Modulation System**: 4 LFOs, 2 Envelopes, 2 Step Sequencers, Mod Matrix (CLAP plugins)
+- [x] **CLAP Parameter Modulation**: Full support for CLAP_PARAM_IS_MODULATABLE parameters
 
 ### Ducker (Planned)
 - [ ] **Ducker Presets**: Save/load ducker settings independently from effect chain
@@ -201,13 +216,10 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 
 ### MIDI (Planned)
 - [ ] **MIDI Learn**: Map hardware MIDI CC to macro knobs
-- [ ] **Macro Assignment UI**: Right-click to map macros to hosted plugin parameters
+- [ ] **MIDI-Triggered Envelopes**: Trigger modulation envelopes from MIDI notes
 
 ### State Management (Planned)
 - [ ] **Undo/Redo**: Undo changes to effect chain and parameters
-
-### Plugin Hosting (Planned)
-- [ ] **CLAP Plugin Hosting**: Load CLAP plugins in addition to VST3
 
 ### Platform Support (Planned)
 - [ ] **Code Signing**: macOS notarization and Windows signing for distribution

@@ -105,9 +105,11 @@ private:
     juce::TextButton modPanelToggleButton{"MODULATION"};
 
     // Tab buttons
-    enum class ModTab { LFOs, Matrix };
+    enum class ModTab { LFOs, Envs, StepSeqs, Matrix };
     ModTab currentModTab = ModTab::LFOs;
     juce::TextButton modTabLFOsButton{"LFOs"};
+    juce::TextButton modTabEnvsButton{"Envs"};
+    juce::TextButton modTabSeqsButton{"Seqs"};
     juce::TextButton modTabMatrixButton{"Matrix"};
 
     // LFO controls (4 LFOs)
@@ -120,6 +122,30 @@ private:
         juce::Label nameLabel{"", "LFO 1"};
     };
     std::array<LFOControls, 4> lfoControls;
+
+    // Envelope controls (2 envelopes)
+    struct EnvControls {
+        juce::Slider attackSlider;
+        juce::Slider decaySlider;
+        juce::Slider sustainSlider;
+        juce::Slider releaseSlider;
+        juce::Slider depthSlider;
+        juce::TextButton triggerButton{"Trigger"};
+        juce::Label nameLabel{"", "Env 1"};
+    };
+    std::array<EnvControls, 2> envControls;
+
+    // Step Sequencer controls (2 sequencers)
+    struct SeqControls {
+        std::array<juce::Slider, 16> stepSliders;  // 16 visible steps
+        juce::ComboBox divisionBox;
+        juce::Slider glideSlider;
+        juce::Slider depthSlider;
+        juce::ComboBox patternBox;
+        juce::Label nameLabel{"", "Seq 1"};
+    };
+    std::array<SeqControls, 2> seqControls;
+    int currentSeqIndex = 0;  // Which sequencer is displayed
 
     // Matrix controls
     juce::ComboBox matrixSourceBox;      // Select LFO source

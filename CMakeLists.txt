@@ -44,13 +44,15 @@ juce_add_plugin(UhbikWrapper
     PRODUCT_NAME "UhbikWrapper"
 )
 
-# CLAP format export disabled due to sidechain bus compatibility issues
-# with clap-juce-extensions. VST3 works fine, and CLAP hosting is supported.
-# clap_juce_extensions_plugin(
-#     TARGET UhbikWrapper
-#     CLAP_ID "com.inclusiveaudio.uhbikwrapper"
-#     CLAP_FEATURES audio-effect utility
-# )
+# CLAP format export - re-enabled for testing
+# Note: May have sidechain bus compatibility issues in some hosts
+clap_juce_extensions_plugin(
+    TARGET UhbikWrapper
+    CLAP_ID "com.inclusiveaudio.uhbikwrapper"
+    CLAP_FEATURES audio-effect utility
+    CLAP_MANUAL_URL "https://github.com/davelarsen58/UhbikWrapper"
+    CLAP_SUPPORT_URL "https://github.com/davelarsen58/UhbikWrapper/issues"
+)
 
 target_sources(UhbikWrapper PRIVATE
     Source/PluginProcessor.cpp
