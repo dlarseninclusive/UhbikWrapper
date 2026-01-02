@@ -27,13 +27,12 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     pluginSelector.addListener(this);
     addAndMakeVisible(pluginSelector);
 
-    // Format filter dropdown
+    // Format filter (used internally, not shown as separate control)
     formatFilter.addItem("All", 1);
     formatFilter.addItem("CLAP", 2);
     formatFilter.addItem("VST3", 3);
     formatFilter.setSelectedId(1);
-    formatFilter.addListener(this);
-    addAndMakeVisible(formatFilter);
+    // Not adding listener or making visible - controlled via View menu
 
     addButton.addListener(this);
     addButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
@@ -391,7 +390,6 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
 {
     audioProcessor.removeChangeListener(this);
     pluginSelector.removeListener(this);
-    formatFilter.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
     duckerToggleButton.removeListener(this);
@@ -496,11 +494,6 @@ void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
             audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
             pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification); // Reset selection
         }
-    }
-    else if (comboBox == &formatFilter)
-    {
-        // Re-populate the plugin selector based on the filter
-        populatePluginSelector();
     }
     else if (comboBox == &matrixSlotBox)
     {
@@ -1379,14 +1372,12 @@ void UhbikWrapperAudioProcessorEditor::resized()
     auto headerBounds = bounds.removeFromTop(50);
     int buttonY = 11;  // Center buttons vertically in 50px header
 
-    // Right side: [filter] [selector] [+]
+    // Right side: [selector] [+]
     int addBtnWidth = 40;
-    int filterWidth = 60;
-    int selectorWidth = juce::jmin(180, bounds.getWidth() / 3);
+    int selectorWidth = juce::jmin(200, bounds.getWidth() / 3);
 
     addButton.setBounds(getWidth() - addBtnWidth - 15, buttonY, addBtnWidth, 28);
     pluginSelector.setBounds(addButton.getX() - selectorWidth - 6, buttonY, selectorWidth, 28);
-    formatFilter.setBounds(pluginSelector.getX() - filterWidth - 6, buttonY, filterWidth, 28);
 
     // View menu button after title (EFFECT RACK is at browserWidth + 15, ~140px wide)
     viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
@@ -1659,6 +1650,14 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
 {
     juce::PopupMenu menu;
 
+    int currentFilter = formatFilter.getSelectedId();
+
+    menu.addSectionHeader("Plugin Filter");
+    menu.addItem(20, "Show All", true, currentFilter == 1);
+    menu.addItem(21, "CLAP Only", true, currentFilter == 2);
+    menu.addItem(22, "VST3 Only", true, currentFilter == 3);
+
+    menu.addSeparator();
     menu.addSectionHeader("Zoom");
     menu.addItem(1, "100%", true, uiScale == 1.0f);
     menu.addItem(2, "150%", true, uiScale == 1.5f);
@@ -1679,6 +1678,9 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
                 case 3: setUIScale(2.0f); break;
                 case 4: setUIScale(3.0f); break;
                 case 10: audioProcessor.debugLogging.store(!audioProcessor.debugLogging.load()); break;
+                case 20: formatFilter.setSelectedId(1); populatePluginSelector(); break;
+                case 21: formatFilter.setSelectedId(2); populatePluginSelector(); break;
+                case 22: formatFilter.setSelectedId(3); populatePluginSelector(); break;
                 default: break;
             }
         });
