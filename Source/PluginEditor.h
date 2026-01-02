@@ -57,6 +57,7 @@ private:
     std::vector<UnifiedPluginDescription> effectPlugins; // Effects only (no instruments) - VST3 and CLAP
 
     juce::ComboBox pluginSelector;
+    juce::ComboBox formatFilter;  // Filter by CLAP/VST3/All
     juce::TextButton addButton{"+"};
     juce::TextButton viewMenuButton{"View"};
 
