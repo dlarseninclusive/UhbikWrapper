@@ -143,7 +143,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     duckerReleaseSlider.removeListener(this);
     duckerHoldSlider.removeListener(this);
     editorWindowCache.clear();
-    clapEditorWindowCache.clear();
+    audioProcessor.closeAllCLAPEditors();
 }
 
 void UhbikWrapperAudioProcessorEditor::timerCallback()
@@ -319,28 +319,7 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
             ++it;
     }
 
-    // Clean up CLAP editor windows for plugins that no longer exist
-    for (auto it = clapEditorWindowCache.begin(); it != clapEditorWindowCache.end(); )
-    {
-        bool found = false;
-        for (int i = 0; i < audioProcessor.getChainSize(); ++i)
-        {
-            auto& slot = audioProcessor.effectChain[static_cast<size_t>(i)];
-            if (slot.isCLAP() && slot.clapPlugin.get() == it->first)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-        {
-            if (it->second != nullptr)
-                it->second->setVisible(false);
-            it = clapEditorWindowCache.erase(it);
-        }
-        else
-            ++it;
-    }
+    // Note: CLAP editor windows are cleaned up automatically when plugins are removed
 
     int chainSize = audioProcessor.getChainSize();
     int slotHeight = 60;
@@ -463,34 +442,18 @@ void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
             return;
         }
 
-        // Check if we already have a cached window for this CLAP plugin
-        auto it = clapEditorWindowCache.find(clapPlugin);
-        if (it != clapEditorWindowCache.end() && it->second != nullptr)
+        // Create the CLAP editor window
+        auto* editorWindow = clapPlugin->createEditorWindow();
+        if (editorWindow == nullptr)
         {
-            it->second->setVisible(true);
-            it->second->toFront(true);
+            std::cerr << "[UI] CLAP createEditorWindow returned nullptr" << std::endl << std::flush;
             return;
         }
 
-        // Create the CLAP editor - it creates its own native window via addToDesktop
-        auto* editor = clapPlugin->createEditor();
-        if (editor == nullptr)
-        {
-            std::cerr << "[UI] CLAP createEditor returned nullptr" << std::endl << std::flush;
-            return;
-        }
-
-        std::cerr << "[UI] CLAP editor created, size: " << editor->getWidth() << "x" << editor->getHeight() << std::endl << std::flush;
-
-        // The CLAP editor uses addToDesktop() so it's already a top-level window
-        // Just center and show it - no need for a wrapper DocumentWindow
-        auto screenBounds = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
-        editor->setCentrePosition(screenBounds.getCentreX(), screenBounds.getCentreY());
-        editor->setVisible(true);
-        editor->toFront(true);
-
-        // We don't cache in clapEditorWindowCache since it's not an EditorWindow
-        // The editor is owned by the CLAPPluginInstance
+        // The window is already visible from the constructor
+        // Just bring it to front
+        editorWindow->toFront(true);
+        std::cerr << "[UI] CLAP editor window shown" << std::endl << std::flush;
         return;
     }
 
@@ -947,12 +910,7 @@ void UhbikWrapperAudioProcessorEditor::initPresetRequested()
             entry.second->setVisible(false);
     }
 
-    // Hide CLAP editor windows
-    for (auto& entry : clapEditorWindowCache)
-    {
-        if (entry.second != nullptr)
-            entry.second->setVisible(false);
-    }
+    // Note: CLAP editor windows are closed automatically when plugins are destroyed
 
     // Clear the effect chain asynchronously to avoid threading issues
     // (same pattern as removePlugin)

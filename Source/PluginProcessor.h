@@ -164,6 +164,7 @@ public:
     void setSlotMix(int index, float mixPercent);
     juce::AudioPluginInstance* getPluginAt(int index);  // Returns VST3 plugin or nullptr
     int getChainSize() const { return static_cast<int>(effectChain.size()); }
+    void closeAllCLAPEditors();
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
     const std::vector<UnifiedPluginDescription>& getAvailablePlugins() const { return availablePlugins; }
 

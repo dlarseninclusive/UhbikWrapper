@@ -397,6 +397,15 @@ juce::AudioPluginInstance* UhbikWrapperAudioProcessor::getPluginAt(int index)
     return nullptr;
 }
 
+void UhbikWrapperAudioProcessor::closeAllCLAPEditors()
+{
+    for (auto& slot : effectChain)
+    {
+        if (slot.clapPlugin)
+            slot.clapPlugin->closeEditor();
+    }
+}
+
 const juce::String UhbikWrapperAudioProcessor::getName() const
 {
     return JucePlugin_Name;

@@ -50,9 +50,248 @@ void CLAPPluginInstance::initHost()
     outputEvents.try_push = &CLAPPluginInstance::outputEventsTryPush;
 }
 
-const void* CLAPPluginInstance::hostGetExtension(const clap_host* /*host*/, const char* /*extensionId*/)
+// Static timer support structure (cross-platform)
+clap_host_timer_support CLAPPluginInstance::hostTimerSupport = {
+    &CLAPPluginInstance::hostRegisterTimer,
+    &CLAPPluginInstance::hostUnregisterTimer
+};
+
+bool CLAPPluginInstance::hostRegisterTimer(const clap_host* host, uint32_t periodMs, clap_id* timerId)
 {
-    // TODO: Implement host extensions (log, thread-check, etc.)
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    clap_id id = self->nextTimerId++;
+
+    uint64_t now = static_cast<uint64_t>(juce::Time::currentTimeMillis());
+    self->registeredTimers.push_back({id, periodMs, now});
+    *timerId = id;
+
+    std::cerr << "[CLAP Host] register_timer: id=" << id << " period=" << periodMs << "ms" << std::endl;
+    return true;
+}
+
+bool CLAPPluginInstance::hostUnregisterTimer(const clap_host* host, clap_id timerId)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    std::cerr << "[CLAP Host] unregister_timer: id=" << timerId << std::endl;
+
+    auto& timers = self->registeredTimers;
+    timers.erase(std::remove_if(timers.begin(), timers.end(),
+        [timerId](const RegisteredTimer& t) { return t.id == timerId; }), timers.end());
+    return true;
+}
+
+void CLAPPluginInstance::fireTimers()
+{
+    if (registeredTimers.empty() || !timerExt || !plugin)
+        return;
+
+    uint64_t now = static_cast<uint64_t>(juce::Time::currentTimeMillis());
+
+    for (auto& timer : registeredTimers)
+    {
+        if (now - timer.lastFireTime >= timer.periodMs)
+        {
+            timer.lastFireTime = now;
+            timerExt->on_timer(plugin, timer.id);
+        }
+    }
+}
+
+// Static GUI host support structure
+clap_host_gui CLAPPluginInstance::hostGui = {
+    &CLAPPluginInstance::hostGuiResizeHintsChanged,
+    &CLAPPluginInstance::hostGuiRequestResize,
+    &CLAPPluginInstance::hostGuiRequestShow,
+    &CLAPPluginInstance::hostGuiRequestHide,
+    &CLAPPluginInstance::hostGuiClosed
+};
+
+void CLAPPluginInstance::hostGuiResizeHintsChanged(const clap_host* /*host*/)
+{
+    // Plugin's resize hints changed - we don't use these currently
+}
+
+bool CLAPPluginInstance::hostGuiRequestResize(const clap_host* host, uint32_t width, uint32_t height)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    std::cerr << "[CLAP Host] GUI request_resize: " << width << " x " << height << std::endl;
+
+    if (self->editorWindow)
+    {
+        // Resize the editor window to match the plugin's requested size
+        juce::MessageManager::callAsync([self, width, height]()
+        {
+            if (self->editorWindow)
+            {
+                int w = static_cast<int>(width);
+                int h = static_cast<int>(height);
+                self->editorWindow->setSize(w, h);
+                self->editorWindow->centreWithSize(w, h);
+            }
+        });
+        return true;
+    }
+    return false;
+}
+
+bool CLAPPluginInstance::hostGuiRequestShow(const clap_host* host)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    if (self->editorWindow)
+    {
+        self->editorWindow->setVisible(true);
+        return true;
+    }
+    return false;
+}
+
+bool CLAPPluginInstance::hostGuiRequestHide(const clap_host* host)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    if (self->editorWindow)
+    {
+        self->editorWindow->setVisible(false);
+        return true;
+    }
+    return false;
+}
+
+void CLAPPluginInstance::hostGuiClosed(const clap_host* /*host*/, bool /*wasDestroyed*/)
+{
+    // Plugin notified us that its GUI was closed
+    std::cerr << "[CLAP Host] GUI closed notification" << std::endl;
+}
+
+#if JUCE_LINUX
+// Static POSIX FD support structure
+clap_host_posix_fd_support CLAPPluginInstance::hostPosixFdSupport = {
+    &CLAPPluginInstance::hostRegisterFD,
+    &CLAPPluginInstance::hostModifyFD,
+    &CLAPPluginInstance::hostUnregisterFD
+};
+
+bool CLAPPluginInstance::hostRegisterFD(const clap_host* host, int fd, clap_posix_fd_flags_t flags)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    std::cerr << "[CLAP Host] register_fd: fd=" << fd << " flags=" << flags << std::endl;
+
+    // Check if already registered
+    for (auto& reg : self->registeredFDs)
+    {
+        if (reg.fd == fd)
+        {
+            reg.flags = flags;
+            return true;
+        }
+    }
+
+    self->registeredFDs.push_back({fd, flags});
+    return true;
+}
+
+bool CLAPPluginInstance::hostModifyFD(const clap_host* host, int fd, clap_posix_fd_flags_t flags)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    std::cerr << "[CLAP Host] modify_fd: fd=" << fd << " flags=" << flags << std::endl;
+
+    for (auto& reg : self->registeredFDs)
+    {
+        if (reg.fd == fd)
+        {
+            reg.flags = flags;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CLAPPluginInstance::hostUnregisterFD(const clap_host* host, int fd)
+{
+    auto* self = static_cast<CLAPPluginInstance*>(host->host_data);
+    std::cerr << "[CLAP Host] unregister_fd: fd=" << fd << std::endl;
+
+    auto& fds = self->registeredFDs;
+    fds.erase(std::remove_if(fds.begin(), fds.end(),
+        [fd](const RegisteredFD& r) { return r.fd == fd; }), fds.end());
+    return true;
+}
+
+void CLAPPluginInstance::pollFDs()
+{
+    if (registeredFDs.empty() || !posixFdExt || !plugin)
+        return;
+
+    // Build poll structures
+    std::vector<struct pollfd> pfds;
+    pfds.reserve(registeredFDs.size());
+
+    for (const auto& reg : registeredFDs)
+    {
+        struct pollfd pfd;
+        pfd.fd = reg.fd;
+        pfd.events = 0;
+        if (reg.flags & CLAP_POSIX_FD_READ) pfd.events |= POLLIN;
+        if (reg.flags & CLAP_POSIX_FD_WRITE) pfd.events |= POLLOUT;
+        if (reg.flags & CLAP_POSIX_FD_ERROR) pfd.events |= POLLERR;
+        pfd.revents = 0;
+        pfds.push_back(pfd);
+    }
+
+    // Non-blocking poll
+    int result = poll(pfds.data(), pfds.size(), 0);
+
+    // Dispatch events to plugin - call on_fd for each registered FD
+    // even if poll returns 0, as a timer tick for the plugin
+    for (size_t i = 0; i < pfds.size(); ++i)
+    {
+        clap_posix_fd_flags_t flags = 0;
+
+        if (result > 0 && pfds[i].revents != 0)
+        {
+            // Real events detected
+            if (pfds[i].revents & POLLIN) flags |= CLAP_POSIX_FD_READ;
+            if (pfds[i].revents & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
+            if (pfds[i].revents & POLLERR) flags |= CLAP_POSIX_FD_ERROR;
+        }
+        else
+        {
+            // No events, but still call on_fd as a tick with READ flag
+            // Some plugins expect regular polling
+            flags = CLAP_POSIX_FD_READ;
+        }
+
+        posixFdExt->on_fd(plugin, registeredFDs[i].fd, flags);
+    }
+}
+#endif
+
+const void* CLAPPluginInstance::hostGetExtension(const clap_host* host, const char* extensionId)
+{
+    juce::ignoreUnused(host);
+
+    // GUI support (for resize requests)
+    if (strcmp(extensionId, CLAP_EXT_GUI) == 0)
+    {
+        std::cerr << "[CLAP Host] Providing gui extension" << std::endl;
+        return &hostGui;
+    }
+
+    // Timer support (cross-platform)
+    if (strcmp(extensionId, CLAP_EXT_TIMER_SUPPORT) == 0)
+    {
+        std::cerr << "[CLAP Host] Providing timer-support extension" << std::endl;
+        return &hostTimerSupport;
+    }
+
+#if JUCE_LINUX
+    if (strcmp(extensionId, CLAP_EXT_POSIX_FD_SUPPORT) == 0)
+    {
+        std::cerr << "[CLAP Host] Providing posix-fd-support extension" << std::endl;
+        return &hostPosixFdSupport;
+    }
+#endif
+
+    // Other extensions not implemented yet
     return nullptr;
 }
 
@@ -231,6 +470,19 @@ bool CLAPPluginInstance::queryExtensions()
         plugin->get_extension(plugin, CLAP_EXT_STATE));
     guiExt = static_cast<const clap_plugin_gui*>(
         plugin->get_extension(plugin, CLAP_EXT_GUI));
+
+    // Timer support (cross-platform)
+    timerExt = static_cast<const clap_plugin_timer_support*>(
+        plugin->get_extension(plugin, CLAP_EXT_TIMER_SUPPORT));
+    if (timerExt)
+        std::cerr << "[CLAP Host] Plugin supports timer-support" << std::endl;
+
+#if JUCE_LINUX
+    posixFdExt = static_cast<const clap_plugin_posix_fd_support*>(
+        plugin->get_extension(plugin, CLAP_EXT_POSIX_FD_SUPPORT));
+    if (posixFdExt)
+        std::cerr << "[CLAP Host] Plugin supports posix-fd-support" << std::endl;
+#endif
 
     return true;
 }
@@ -516,48 +768,52 @@ void CLAPPluginInstance::setState(const void* data, size_t sizeInBytes)
 
 bool CLAPPluginInstance::hasEditor() const
 {
-    // CLAP GUI hosting disabled for now due to X11 mouse event forwarding issues
-    // Audio processing, state save/load all work - just no visual editing
-    // TODO: Implement proper XEmbed protocol or use a different approach
-    return false;
+#if JUCE_LINUX
+    if (!plugin || !guiExt)
+        return false;
+    return guiExt->is_api_supported(plugin, CLAP_WINDOW_API_X11, false);
+#else
+    return false;  // Only Linux/X11 implemented for now
+#endif
 }
 
-juce::Component* CLAPPluginInstance::createEditor()
+CLAPEditorWindow* CLAPPluginInstance::createEditorWindow()
 {
-    std::cerr << "[CLAP Host] createEditor called" << std::endl;
-    std::cerr.flush();
+    std::cerr << "[CLAP Host] createEditorWindow called" << std::endl;
 
     if (!hasEditor())
     {
         std::cerr << "[CLAP Host] hasEditor() returned false" << std::endl;
-        std::cerr.flush();
         return nullptr;
     }
-
-    std::cerr << "[CLAP Host] hasEditor() returned true, closing existing editor" << std::endl;
-    std::cerr.flush();
 
     // Close existing editor if any
     closeEditor();
 
-    std::cerr << "[CLAP Host] Creating CLAPEditorComponent" << std::endl;
-    std::cerr.flush();
+    std::cerr << "[CLAP Host] Creating CLAPEditorWindow" << std::endl;
 
-    // Create the editor component
-    editorComponent = std::make_unique<CLAPEditorComponent>(this);
+    // Create the raw X11 editor window
+    editorWindow = std::make_unique<CLAPEditorWindow>(this);
 
-    std::cerr << "[CLAP Host] CLAPEditorComponent created successfully" << std::endl;
-    std::cerr.flush();
-
-    return editorComponent.get();
+    if (editorWindow->isGuiCreated())
+    {
+        std::cerr << "[CLAP Host] CLAPEditorWindow created successfully" << std::endl;
+        return editorWindow.get();
+    }
+    else
+    {
+        std::cerr << "[CLAP Host] Failed to create CLAP GUI" << std::endl;
+        editorWindow.reset();
+        return nullptr;
+    }
 }
 
 void CLAPPluginInstance::closeEditor()
 {
-    if (editorComponent)
+    if (editorWindow)
     {
-        // The component destructor will handle GUI cleanup
-        editorComponent.reset();
+        // The window destructor will handle GUI cleanup
+        editorWindow.reset();
     }
 }
 
@@ -593,75 +849,87 @@ void CLAPPluginInstance::setParameterValue(clap_id paramId, double value)
 }
 
 // ============================================================================
-// CLAPEditorComponent
+// CLAPEditorWindow - JUCE-based window with POSIX FD polling for CLAP GUI
 // ============================================================================
 
-CLAPEditorComponent::CLAPEditorComponent(CLAPPluginInstance* instance)
-    : pluginInstance(instance)
+CLAPEditorWindow::CLAPEditorWindow(CLAPPluginInstance* instance)
+    : DocumentWindow(instance->getName() + " (CLAP)",
+                     juce::Colour(0xff1e1e1e),
+                     DocumentWindow::closeButton)
+    , pluginInstance(instance)
 {
-    std::cerr << "[CLAP GUI] CLAPEditorComponent constructor started" << std::endl;
-    std::cerr.flush();
-
-    setOpaque(true);
+    std::cerr << "[CLAP GUI] CLAPEditorWindow constructor started" << std::endl;
 
     auto* gui = pluginInstance->getGuiExtension();
     auto* plugin = pluginInstance->getPlugin();
 
-    std::cerr << "[CLAP GUI] gui=" << (gui ? "valid" : "null") << " plugin=" << (plugin ? "valid" : "null") << std::endl;
-    std::cerr.flush();
-
-    if (gui && plugin)
+    if (!gui || !plugin)
     {
-        std::cerr << "[CLAP GUI] Calling gui->create with X11 embedded mode" << std::endl;
-        std::cerr.flush();
+        std::cerr << "[CLAP GUI] No GUI extension" << std::endl;
+        return;
+    }
 
-        // Use embedded X11 mode
-        if (gui->create(plugin, CLAP_WINDOW_API_X11, false))
-        {
-            guiCreated = true;
-            std::cerr << "[CLAP GUI] Embedded GUI created for: " << pluginInstance->getName() << std::endl;
-            std::cerr.flush();
+#if JUCE_LINUX
+    const char* api = CLAP_WINDOW_API_X11;
+#elif JUCE_MAC
+    const char* api = CLAP_WINDOW_API_COCOA;
+#elif JUCE_WINDOWS
+    const char* api = CLAP_WINDOW_API_WIN32;
+#else
+    const char* api = nullptr;
+#endif
 
-            // Get the GUI size
-            if (gui->get_size(plugin, &guiWidth, &guiHeight))
-            {
-                std::cerr << "[CLAP GUI] Size: " << guiWidth << " x " << guiHeight << std::endl;
-                std::cerr.flush();
-                setSize(static_cast<int>(guiWidth), static_cast<int>(guiHeight));
-            }
-            else
-            {
-                setSize(800, 600);
-            }
-        }
-        else
-        {
-            std::cerr << "[CLAP GUI] Failed to create embedded GUI" << std::endl;
-            std::cerr.flush();
-            setSize(400, 100);
-        }
+    // Use embedded mode
+    std::cerr << "[CLAP GUI] Creating embedded GUI..." << std::endl;
+
+    if (gui->create(plugin, api, false))  // false = embedded
+    {
+        guiCreated = true;
+        std::cerr << "[CLAP GUI] Created EMBEDDED GUI" << std::endl;
+
+        setUsingNativeTitleBar(true);
+        setResizable(false, false);
+
+        content = std::make_unique<Content>();
+
+        uint32_t width = 800, height = 600;
+        gui->get_size(plugin, &width, &height);
+        std::cerr << "[CLAP GUI] Plugin requested size: " << width << " x " << height << std::endl;
+
+        int w = static_cast<int>(width);
+        int h = static_cast<int>(height);
+
+        // Set content size and add to window
+        content->setSize(w, h);
+        setContentNonOwned(content.get(), true);
+
+        // Centre the window on screen
+        centreWithSize(getWidth(), getHeight());
+
+        std::cerr << "[CLAP GUI] Window size: " << getWidth() << " x " << getHeight() << std::endl;
+
+        setVisible(true);
+        attachPluginGui();
+
+        // Start timer to poll POSIX FDs for plugin event handling
+        startTimer(16);  // ~60fps
+        std::cerr << "[CLAP GUI] Started FD polling timer" << std::endl;
     }
     else
     {
-        setSize(400, 100);
+        std::cerr << "[CLAP GUI] Failed to create GUI" << std::endl;
     }
 
-    // Create simple native window (no decorations - plugin provides its own UI)
-    // Close by clicking elsewhere or pressing Escape
-    addToDesktop(0);
-
-    std::cerr << "[CLAP GUI] CLAPEditorComponent constructor finished" << std::endl;
-    std::cerr.flush();
+    std::cerr << "[CLAP GUI] CLAPEditorWindow constructor finished, guiCreated=" << guiCreated << std::endl;
 }
 
-CLAPEditorComponent::~CLAPEditorComponent()
+CLAPEditorWindow::~CLAPEditorWindow()
 {
-    destroyGui();
-}
+    std::cerr << "[CLAP GUI] CLAPEditorWindow destructor" << std::endl;
 
-void CLAPEditorComponent::destroyGui()
-{
-    if (guiCreated && pluginInstance)
+    stopTimer();
+
+    if (pluginInstance && guiCreated)
     {
         auto* gui = pluginInstance->getGuiExtension();
         auto* plugin = pluginInstance->getPlugin();
@@ -670,102 +938,137 @@ void CLAPEditorComponent::destroyGui()
         {
             gui->hide(plugin);
             gui->destroy(plugin);
-            std::cerr << "[CLAP GUI] GUI destroyed" << std::endl;
+            std::cerr << "[CLAP GUI] CLAP GUI destroyed" << std::endl;
         }
-        guiCreated = false;
-        guiAttached = false;
     }
+
+    content.reset();
 }
 
-void CLAPEditorComponent::paint(juce::Graphics& g)
+void CLAPEditorWindow::closeButtonPressed()
 {
-    // Paint background - the CLAP plugin will render on top
-    g.fillAll(juce::Colour(0xff1a1a1a));
+    std::cerr << "[CLAP GUI] Close button pressed" << std::endl;
+    stopTimer();
 
-    if (!guiCreated)
+    // Properly destroy the GUI
+    if (pluginInstance && guiCreated)
     {
-        g.setColour(juce::Colours::white);
-        g.setFont(12.0f);
-        g.drawText("CLAP GUI not available", getLocalBounds(), juce::Justification::centred);
+        auto* gui = pluginInstance->getGuiExtension();
+        auto* plugin = pluginInstance->getPlugin();
+
+        if (gui && plugin)
+        {
+            gui->hide(plugin);
+            gui->destroy(plugin);
+            guiCreated = false;
+            std::cerr << "[CLAP GUI] CLAP GUI destroyed on close" << std::endl;
+        }
     }
+
+    setVisible(false);
 }
 
-void CLAPEditorComponent::resized()
+void CLAPEditorWindow::timerCallback()
 {
-    // Nothing to do - CLAP plugin handles its own sizing
-}
-
-void CLAPEditorComponent::parentHierarchyChanged()
-{
-    // Delay attachment to ensure window is fully ready
-    if (guiCreated && !guiAttached)
-    {
-        juce::Timer::callAfterDelay(100, [this]() {
-            createAndAttachGui();
-        });
-    }
-}
-
-void CLAPEditorComponent::createAndAttachGui()
-{
-    if (!guiCreated || guiAttached || !pluginInstance)
+    if (!pluginInstance)
         return;
 
-    auto* peer = getPeer();
-    if (!peer)
-    {
-        std::cerr << "[CLAP GUI] No peer yet" << std::endl;
-        std::cerr.flush();
+    // Fire registered timers (cross-platform)
+    pluginInstance->fireTimers();
+
+#if JUCE_LINUX
+    // Poll registered file descriptors and dispatch events to plugin
+    pluginInstance->pollFDs();
+#endif
+}
+
+void CLAPEditorWindow::attachPluginGui()
+{
+    if (!guiCreated || !pluginInstance || !content)
         return;
-    }
 
     auto* gui = pluginInstance->getGuiExtension();
     auto* plugin = pluginInstance->getPlugin();
     if (!gui || !plugin)
         return;
 
-    void* nativeHandle = peer->getNativeHandle();
-    if (!nativeHandle)
+    // Get the native window handle from the content component
+    auto* peer = content->getPeer();
+    if (!peer)
     {
-        std::cerr << "[CLAP GUI] No native handle available" << std::endl;
-        std::cerr.flush();
+        std::cerr << "[CLAP GUI] No peer available" << std::endl;
         return;
     }
 
-    std::cerr << "[CLAP GUI] Attaching to X11 window: " << reinterpret_cast<unsigned long>(nativeHandle) << std::endl;
-    std::cerr.flush();
+    void* nativeHandle = peer->getNativeHandle();
+    if (!nativeHandle)
+    {
+        std::cerr << "[CLAP GUI] No native handle" << std::endl;
+        return;
+    }
+
+    std::cerr << "[CLAP GUI] Native handle: " << nativeHandle << std::endl;
 
     clap_window_t window;
+#if JUCE_LINUX
     window.api = CLAP_WINDOW_API_X11;
     window.x11 = reinterpret_cast<clap_xwnd>(nativeHandle);
-
-    // Set scale before attaching
-    auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
-    if (display)
-        gui->set_scale(plugin, display->scale);
+#elif JUCE_MAC
+    window.api = CLAP_WINDOW_API_COCOA;
+    window.cocoa = nativeHandle;
+#elif JUCE_WINDOWS
+    window.api = CLAP_WINDOW_API_WIN32;
+    window.win32 = nativeHandle;
+#endif
 
     if (gui->set_parent(plugin, &window))
     {
-        std::cerr << "[CLAP GUI] set_parent succeeded" << std::endl;
-        std::cerr.flush();
+        std::cerr << "[CLAP GUI] Parent set successfully" << std::endl;
 
         if (gui->show(plugin))
         {
-            guiAttached = true;
-            std::cerr << "[CLAP GUI] GUI shown successfully" << std::endl;
-            std::cerr.flush();
-            repaint();
+            std::cerr << "[CLAP GUI] Plugin GUI shown" << std::endl;
+
+#if JUCE_LINUX
+            // Debug: find child window and check its event mask
+            Display* display = XOpenDisplay(nullptr);
+            if (display)
+            {
+                Window parentWin = reinterpret_cast<Window>(nativeHandle);
+                Window root, parent;
+                Window* children = nullptr;
+                unsigned int numChildren = 0;
+
+                XSync(display, False);
+
+                if (XQueryTree(display, parentWin, &root, &parent, &children, &numChildren))
+                {
+                    std::cerr << "[CLAP GUI] Parent window " << parentWin << " has " << numChildren << " children" << std::endl;
+                    for (unsigned int i = 0; i < numChildren; ++i)
+                    {
+                        XWindowAttributes attrs;
+                        if (XGetWindowAttributes(display, children[i], &attrs))
+                        {
+                            std::cerr << "[CLAP GUI] Child " << i << ": window=" << children[i]
+                                      << " size=" << attrs.width << "x" << attrs.height
+                                      << " all_event_masks=0x" << std::hex << attrs.all_event_masks
+                                      << " your_event_mask=0x" << attrs.your_event_mask << std::dec << std::endl;
+                        }
+                    }
+                    if (children) XFree(children);
+                }
+                XCloseDisplay(display);
+            }
+#endif
         }
         else
         {
-            std::cerr << "[CLAP GUI] show() failed" << std::endl;
-            std::cerr.flush();
+            std::cerr << "[CLAP GUI] Failed to show plugin GUI" << std::endl;
         }
     }
     else
     {
-        std::cerr << "[CLAP GUI] set_parent failed" << std::endl;
-        std::cerr.flush();
+        std::cerr << "[CLAP GUI] Failed to set parent" << std::endl;
     }
 }
 

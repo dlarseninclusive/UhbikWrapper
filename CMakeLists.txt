@@ -72,6 +72,11 @@ target_compile_definitions(UhbikWrapper PUBLIC
     JUCE_PLUGINHOST_VST3=1
 )
 
+# Find X11 for CLAP GUI hosting on Linux
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+endif()
+
 target_link_libraries(UhbikWrapper PRIVATE
     # Essential JUCE modules for a plugin that hosts other plugins
     juce::juce_audio_utils
@@ -88,6 +93,8 @@ target_link_libraries(UhbikWrapper PRIVATE
     # CLAP hosting support (from clap-juce-extensions bundled libraries)
     clap
     clap-helpers
+    # X11 for CLAP plugin GUI embedding on Linux
+    $<$<PLATFORM_ID:Linux>:${X11_LIBRARIES}>
 )
 
 # Add CLAP include directories (from clap-juce-extensions)

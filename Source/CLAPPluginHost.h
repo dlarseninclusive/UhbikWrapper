@@ -4,39 +4,52 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <clap/clap.h>
+#include <clap/ext/posix-fd-support.h>
+#include <clap/ext/timer-support.h>
 #include <memory>
 #include <vector>
 #include <string>
 #include <functional>
 
+#if JUCE_LINUX
+    #include <X11/Xlib.h>
+    #include <poll.h>
+#endif
+
 // Forward declarations
 struct CLAPPluginInstance;
 class CLAPPluginInstance;
 
-// Component that hosts a CLAP plugin's GUI
-class CLAPEditorComponent : public juce::Component
+// JUCE-based window for hosting CLAP plugin GUIs with POSIX FD polling
+class CLAPEditorWindow : public juce::DocumentWindow,
+                         private juce::Timer
 {
 public:
-    CLAPEditorComponent(CLAPPluginInstance* instance);
-    ~CLAPEditorComponent() override;
+    CLAPEditorWindow(CLAPPluginInstance* instance);
+    ~CLAPEditorWindow() override;
 
-    void paint(juce::Graphics& g) override;
-    void resized() override;
-    void parentHierarchyChanged() override;
-
+    void closeButtonPressed() override;
     bool isGuiCreated() const { return guiCreated; }
 
 private:
+    void timerCallback() override;
+
+    // Inner component - transparent container for plugin GUI
+    class Content : public juce::Component
+    {
+    public:
+        Content() {
+            setInterceptsMouseClicks(false, false);
+            setOpaque(false);
+        }
+        void paint(juce::Graphics&) override {}  // Plugin renders itself
+    };
+
     CLAPPluginInstance* pluginInstance = nullptr;
+    std::unique_ptr<Content> content;
     bool guiCreated = false;
-    bool guiAttached = false;
-    uint32_t guiWidth = 800;
-    uint32_t guiHeight = 600;
 
-    void createAndAttachGui();
-    void destroyGui();
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CLAPEditorComponent)
+    void attachPluginGui();
 };
 
 // Description of a CLAP plugin (analogous to juce::PluginDescription)
@@ -80,7 +93,7 @@ public:
 
     // GUI
     bool hasEditor() const;
-    juce::Component* createEditor();
+    CLAPEditorWindow* createEditorWindow();  // Returns raw X11 window (not a Component)
     void closeEditor();
 
     // For CLAPEditorComponent to access
@@ -96,6 +109,14 @@ public:
     bool getParameterInfo(uint32_t paramIndex, clap_param_info* info) const;
     double getParameterValue(clap_id paramId) const;
     void setParameterValue(clap_id paramId, double value);
+
+#if JUCE_LINUX
+    // Poll registered FDs and dispatch events (called by CLAPEditorWindow timer)
+    void pollFDs();
+#endif
+
+    // Fire registered timers (called by CLAPEditorWindow timer)
+    void fireTimers();
 
 private:
     CLAPPluginDescription description;
@@ -147,8 +168,47 @@ private:
     static const clap_event_header* inputEventsGet(const clap_input_events* list, uint32_t index);
     static bool outputEventsTryPush(const clap_output_events* list, const clap_event_header* event);
 
+#if JUCE_LINUX
+    // POSIX FD support for Linux GUI event handling
+    struct RegisteredFD {
+        int fd;
+        uint32_t flags;
+    };
+    std::vector<RegisteredFD> registeredFDs;
+    const clap_plugin_posix_fd_support* posixFdExt = nullptr;
+
+    // Host-side POSIX FD callbacks (static because CLAP uses C callbacks)
+    static bool hostRegisterFD(const clap_host* host, int fd, clap_posix_fd_flags_t flags);
+    static bool hostModifyFD(const clap_host* host, int fd, clap_posix_fd_flags_t flags);
+    static bool hostUnregisterFD(const clap_host* host, int fd);
+    static clap_host_posix_fd_support hostPosixFdSupport;
+#endif
+
+    // Timer support for plugin GUI event handling (cross-platform)
+    struct RegisteredTimer {
+        clap_id id;
+        uint32_t periodMs;
+        uint64_t lastFireTime;  // ms since epoch
+    };
+    std::vector<RegisteredTimer> registeredTimers;
+    clap_id nextTimerId = 1;
+    const clap_plugin_timer_support* timerExt = nullptr;
+
+    // Host-side timer callbacks
+    static bool hostRegisterTimer(const clap_host* host, uint32_t periodMs, clap_id* timerId);
+    static bool hostUnregisterTimer(const clap_host* host, clap_id timerId);
+    static clap_host_timer_support hostTimerSupport;
+
+    // Host-side GUI callbacks (for resize requests)
+    static void hostGuiResizeHintsChanged(const clap_host* host);
+    static bool hostGuiRequestResize(const clap_host* host, uint32_t width, uint32_t height);
+    static bool hostGuiRequestShow(const clap_host* host);
+    static bool hostGuiRequestHide(const clap_host* host);
+    static void hostGuiClosed(const clap_host* host, bool wasDestroyed);
+    static clap_host_gui hostGui;
+
     // GUI
-    std::unique_ptr<juce::Component> editorComponent;
+    std::unique_ptr<CLAPEditorWindow> editorWindow;
 
     // Extensions cache
     const clap_plugin_audio_ports* audioPortsExt = nullptr;

@@ -77,7 +77,7 @@ private:
         void closeButtonPressed() override { setVisible(false); }
     };
     std::map<juce::AudioPluginInstance*, std::unique_ptr<EditorWindow>> editorWindowCache;
-    std::map<CLAPPluginInstance*, std::unique_ptr<EditorWindow>> clapEditorWindowCache;
+    // Note: CLAP editor windows are managed by CLAPPluginInstance::editorWindow
 
     void savePreset();
     void loadPreset();
