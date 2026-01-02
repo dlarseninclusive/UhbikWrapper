@@ -93,6 +93,14 @@ sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/CLAP/UhbikWrapper
 ```
 Then rescan plugins in your DAW (Bitwig: Settings → Locations → Clear cache → Rescan).
 
+## Documentation
+
+- [Getting Started](docs/getting-started.md) - Installation and basic usage
+- [Modulation System](docs/modulation.md) - LFOs, envelopes, step sequencers, and mod matrix
+- [Preset Management](docs/presets.md) - Saving, loading, and organizing presets
+- [Ducker](docs/ducker.md) - Sidechain-triggered volume ducking
+- [Building from Source](docs/building.md) - Compile your own builds
+
 ## Usage
 
 1.  **Load in DAW**: The plugin auto-installs to `~/.vst3/` so your DAW should find it automatically
