@@ -62,6 +62,13 @@ UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
     std::cerr.flush();
 
     ensurePresetsFolderExists();
+
+    // Cache macro parameter pointers for audio-thread access (avoid string lookup)
+    for (int i = 0; i < NUM_MACROS; ++i)
+    {
+        juce::String macroId = "macro" + juce::String(i + 1);
+        macroParams[i] = apvts.getRawParameterValue(macroId);
+    }
 }
 
 UhbikWrapperAudioProcessor::~UhbikWrapperAudioProcessor()
@@ -950,7 +957,9 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     int currentSlotIndex = static_cast<int>(&slot - effectChain.data());
 
                     // Generate modulation events for this slot
+                    // Pre-allocate to avoid audio-thread allocation (max: routes * blocks)
                     std::vector<CLAPPluginInstance::ModulationEvent> modEvents;
+                    modEvents.reserve(64);
 
                     // Try to lock modulation routes - skip modulation if locked
                     const juce::SpinLock::ScopedTryLockType modLock(modulationLock);
@@ -997,9 +1006,9 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                         case ModSourceType::Macro:
                                             if (route.sourceIndex >= 0 && route.sourceIndex < NUM_MACROS)
                                             {
-                                                juce::String macroId = "macro" + juce::String(route.sourceIndex + 1);
-                                                if (auto* param = apvts.getRawParameterValue(macroId))
-                                                    modValue = (param->load() * 2.0f - 1.0f); // Convert 0-1 to bipolar
+                                                // Use cached pointer - no string allocation on audio thread
+                                                if (macroParams[route.sourceIndex] != nullptr)
+                                                    modValue = (macroParams[route.sourceIndex]->load() * 2.0f - 1.0f);
                                             }
                                             break;
                                     }
