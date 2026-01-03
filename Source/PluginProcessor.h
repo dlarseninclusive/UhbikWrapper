@@ -251,5 +251,9 @@ private:
     float duckerEnvelope = 0.0f;
     float duckerHoldCounter = 0.0f;
     double currentSampleRate = 44100.0;
+
+    // Cached macro parameter pointers (avoid string lookup on audio thread)
+    std::atomic<float>* macroParams[NUM_MACROS] = {nullptr};
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };
