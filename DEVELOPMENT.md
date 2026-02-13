@@ -13,6 +13,7 @@ Planned enhancements to add DAW parameter exposure, macro controls, and visualiz
 - **Wet/Dry mix** per effect
 - **Input/Output gain** controls
 - **MIDI Learn** for macro knobs
+- **Multiband processing** - split signal into frequency bands with independent effect chains (like Kilohearts Multipass)
 
 ---
 
@@ -212,6 +213,54 @@ void handleMidiLearn(const juce::MidiMessage& msg)
 }
 ```
 
+### Phase 7: Multiband Processing
+
+**Goal:** Split audio into frequency bands, each with its own independent effect chain (inspired by Kilohearts Multipass)
+
+**Requested by:** KVR user Dirtgrain (Jan 2026)
+
+**Core concepts:**
+- Crossover filter splits input into N bands (2-4 bands typical)
+- Each band has its own independent effect chain (reusing existing EffectSlot system)
+- Bands are summed back together after processing
+- User-adjustable crossover frequencies
+- Solo/mute per band
+- Optional linear-phase crossover mode
+
+**Key components:**
+```cpp
+struct FrequencyBand {
+    float lowFreq;                              // Band low cutoff (Hz)
+    float highFreq;                             // Band high cutoff (Hz)
+    std::vector<EffectSlot> effectChain;        // Independent chain per band
+    bool solo = false;
+    bool mute = false;
+    float gain = 0.0f;                          // Per-band gain (dB)
+};
+
+class MultibandProcessor {
+    std::vector<FrequencyBand> bands;
+    juce::dsp::LinkwitzRileyFilter<float> crossoverFilters;
+    int numBands = 3;                           // Default 3-band
+    // Crossover frequencies adjustable via UI
+};
+```
+
+**UI concept:**
+- Toggle between single-chain mode (current) and multiband mode
+- Horizontal band visualization with draggable crossover points
+- Each band expands to show its own effect chain
+- Band controls: solo, mute, gain, bypass
+
+**Implementation steps:**
+1. Create crossover filter system using Linkwitz-Riley filters (juce_dsp)
+2. Create FrequencyBand struct with independent effect chains
+3. Add multiband processing path in processBlock
+4. Design band split visualization with draggable crossover points
+5. Adapt existing chain UI to work per-band
+6. Add single-chain / multiband mode toggle
+7. Persist multiband state in presets
+
 ---
 
 ## UI Layout (Target)
@@ -253,12 +302,16 @@ Legend:
 11. **Phase 5a**: Create SpectrumAnalyzer component (requires juce_dsp)
 12. **Phase 5b**: Add spectrum popup windows
 13. **Phase 6**: Implement MIDI learn system
+14. **Phase 7a**: Create crossover filter system (Linkwitz-Riley)
+15. **Phase 7b**: Implement per-band effect chains
+16. **Phase 7c**: Build multiband UI with draggable crossover points
+17. **Phase 7d**: Add single-chain / multiband mode toggle
 
 ---
 
 ## Dependencies
 
-- Add `juce_dsp` module to CMakeLists.txt for FFT/spectrum analyzer
+- Add `juce_dsp` module to CMakeLists.txt for FFT/spectrum analyzer and Linkwitz-Riley crossover filters
 - No external dependencies required
 
 ## Technical Notes
