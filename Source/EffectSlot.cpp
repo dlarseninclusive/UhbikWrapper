@@ -181,18 +181,18 @@ void EffectSlotComponent::resized()
 
     // Buttons on the right (Edit, Bypass, Remove)
     auto buttonArea = bounds.removeFromRight(buttonWidth * 3 + 8);
-    int buttonY = (bounds.getHeight() - buttonHeight) / 2;
+    int buttonY = bounds.getY() + (bounds.getHeight() - buttonHeight) / 2;
     editButton.setBounds(buttonArea.getX(), buttonY, buttonWidth, buttonHeight);
     bypassButton.setBounds(buttonArea.getX() + buttonWidth + 2, buttonY, buttonWidth, buttonHeight);
     removeButton.setBounds(buttonArea.getX() + buttonWidth * 2 + 4, buttonY, buttonWidth, buttonHeight);
 
     // Knobs area (3 knobs with labels)
-    auto knobSize = 36;
+    auto knobSize = 42;
     auto knobSpacing = 4;
     auto labelHeight = 12;
     auto knobAreaWidth = knobSize * 3 + knobSpacing * 2;
     auto knobArea = bounds.removeFromRight(knobAreaWidth + 8);
-    int knobY = (bounds.getHeight() - knobSize - labelHeight) / 2;
+    int knobY = bounds.getY() + (bounds.getHeight() - knobSize - labelHeight) / 2;
 
     inputGainSlider.setBounds(knobArea.getX(), knobY, knobSize, knobSize);
     inputGainLabel.setBounds(knobArea.getX(), knobY + knobSize, knobSize, labelHeight);

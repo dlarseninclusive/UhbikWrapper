@@ -58,6 +58,7 @@ private:
 
     juce::ComboBox pluginSelector;
     juce::ComboBox formatFilter;  // Filter by CLAP/VST3/All
+    juce::ComboBox typeFilter;    // Filter by Effects/Instruments/All
     juce::TextButton addButton{"+"};
     juce::TextButton viewMenuButton{"View"};
 
@@ -175,6 +176,31 @@ private:
     void populateMatrixSlotBox();
     void populateMatrixParamBox();
     void refreshModRoutesList();
+
+    // --- Multiband UI ---
+    // activeBandIndex: -1=Main (single chain), 0=Low, 1=Mid, 2=High
+    int activeBandIndex = -1;
+    juce::TextButton bandMainButton{"MAIN"};
+    juce::TextButton bandLowButton{"LOW"};
+    juce::TextButton bandMidButton{"MID"};
+    juce::TextButton bandHighButton{"HIGH"};
+    juce::Slider lowMidCrossoverSlider;
+    juce::Slider midHighCrossoverSlider;
+    juce::Label lowMidCrossoverLabel{"", "Low/Mid"};
+    juce::Label midHighCrossoverLabel{"", "Mid/High"};
+
+    // Per-band solo/mute (TextButtons that toggle visually)
+    juce::TextButton bandSoloButtons[3];
+    juce::TextButton bandMuteButtons[3];
+    juce::Slider bandGainSliders[3];
+    juce::Label bandChainLabel{"", ""};  // Shows "LOW Band" / "MID Band" / "HIGH Band" above chain
+
+    void updateMultibandUI();
+    void updateBandTabButtons();
+
+    // Helper: get the currently active chain (single-chain or active band)
+    std::vector<EffectSlot>& getActiveChain();
+    int getActiveChainSize();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessorEditor)
 };

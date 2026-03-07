@@ -34,6 +34,14 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     formatFilter.setSelectedId(1);
     // Not adding listener or making visible - controlled via View menu
 
+    // Type filter (Effects/Instruments/All)
+    typeFilter.addItem("All", 1);
+    typeFilter.addItem("Effects", 2);
+    typeFilter.addItem("Instruments", 3);
+    typeFilter.setSelectedId(1);
+    typeFilter.addListener(this);
+    addAndMakeVisible(typeFilter);
+
     addButton.addListener(this);
     addButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff44aa44));
     addAndMakeVisible(addButton);
@@ -43,7 +51,8 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     addAndMakeVisible(viewMenuButton);
 
     populatePluginSelector();
-    refreshChainDisplay();
+    // Don't call refreshChainDisplay() here — resized() will call it
+    // with proper viewport dimensions after the component is laid out.
 
     // Ducker panel setup
     duckerToggleButton.addListener(this);
@@ -371,17 +380,99 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     matrixRoutesList.setRowHeight(20);
     addChildComponent(matrixRoutesList);
 
-    // Apply saved UI scale after a short delay (JUCE needs component to be fully ready)
-    uiScale = audioProcessor.uiScale.load();
-    if (uiScale != 1.0f)
+    // === Multiband UI Setup ===
+    // Band tab buttons (always visible) — MAIN/LOW/MID/HIGH
+    bandMainButton.addListener(this);
+    bandMainButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff888888));
+    addAndMakeVisible(bandMainButton);
+
+    juce::Colour bandColours[] = {
+        juce::Colour(0xff4488cc),  // Blue for low
+        juce::Colour(0xff44aa44),  // Green for mid
+        juce::Colour(0xffcc6644)   // Orange for high
+    };
+    juce::TextButton* bandBtns[] = { &bandLowButton, &bandMidButton, &bandHighButton };
+
+    for (int b = 0; b < 3; ++b)
     {
-        juce::Component::SafePointer<UhbikWrapperAudioProcessorEditor> safeThis(this);
-        juce::Timer::callAfterDelay(100, [safeThis, scale = uiScale]()
-        {
-            if (safeThis != nullptr)
-                safeThis->setScaleFactor(scale);
-        });
+        bandBtns[b]->addListener(this);
+        bandBtns[b]->setColour(juce::TextButton::buttonColourId, bandColours[b]);
+        addAndMakeVisible(*bandBtns[b]);
+
+        // Solo buttons — yellow when active
+        bandSoloButtons[b].setButtonText("S");
+        bandSoloButtons[b].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333333));
+        bandSoloButtons[b].setColour(juce::TextButton::textColourOffId, juce::Colour(0xffaaaaaa));
+        bandSoloButtons[b].addListener(this);
+        addChildComponent(bandSoloButtons[b]);
+
+        // Mute buttons — red when active
+        bandMuteButtons[b].setButtonText("M");
+        bandMuteButtons[b].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333333));
+        bandMuteButtons[b].setColour(juce::TextButton::textColourOffId, juce::Colour(0xffaaaaaa));
+        bandMuteButtons[b].addListener(this);
+        addChildComponent(bandMuteButtons[b]);
+
+        // Per-band gain sliders
+        bandGainSliders[b].setSliderStyle(juce::Slider::LinearHorizontal);
+        bandGainSliders[b].setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 20);
+        bandGainSliders[b].setRange(-24.0, 24.0, 0.1);
+        bandGainSliders[b].setValue(0.0);
+        bandGainSliders[b].setTextValueSuffix(" dB");
+        bandGainSliders[b].addListener(this);
+        addChildComponent(bandGainSliders[b]);
     }
+
+    // Band chain label (shows which band's chain is displayed)
+    bandChainLabel.setFont(juce::Font(14.0f, juce::Font::bold));
+    bandChainLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(bandChainLabel);
+
+    // Crossover frequency sliders
+    lowMidCrossoverSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    lowMidCrossoverSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    lowMidCrossoverSlider.setRange(20.0, 2000.0, 1.0);
+    lowMidCrossoverSlider.setSkewFactorFromMidPoint(200.0);
+    lowMidCrossoverSlider.setValue(audioProcessor.multibandProcessor.getLowMidCrossover());
+    lowMidCrossoverSlider.setTextValueSuffix(" Hz");
+    lowMidCrossoverSlider.addListener(this);
+    addChildComponent(lowMidCrossoverSlider);
+    lowMidCrossoverLabel.setJustificationType(juce::Justification::centredRight);
+    lowMidCrossoverLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    lowMidCrossoverLabel.setFont(juce::Font(11.0f));
+    addChildComponent(lowMidCrossoverLabel);
+
+    midHighCrossoverSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    midHighCrossoverSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    midHighCrossoverSlider.setRange(200.0, 20000.0, 1.0);
+    midHighCrossoverSlider.setSkewFactorFromMidPoint(2000.0);
+    midHighCrossoverSlider.setValue(audioProcessor.multibandProcessor.getMidHighCrossover());
+    midHighCrossoverSlider.setTextValueSuffix(" Hz");
+    midHighCrossoverSlider.addListener(this);
+    addChildComponent(midHighCrossoverSlider);
+    midHighCrossoverLabel.setJustificationType(juce::Justification::centredRight);
+    midHighCrossoverLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    midHighCrossoverLabel.setFont(juce::Font(11.0f));
+    addChildComponent(midHighCrossoverLabel);
+
+    // Sync activeBandIndex with processor's multibandEnabled state (from saved preset)
+    if (audioProcessor.multibandEnabled.load())
+        activeBandIndex = 0;  // Default to LOW band tab
+    else
+        activeBandIndex = -1; // MAIN tab
+
+    updateMultibandUI();
+
+    // Reset UI scale to 100% on startup to prevent oversized windows.
+    // User can adjust via View menu. Reset the stored value too.
+    uiScale = 1.0f;
+    audioProcessor.uiScale.store(1.0f);
+
+    // Refresh chain display now that all components are set up.
+    // The resized() triggered by setSize() at the top runs before the viewport
+    // is configured, so in DAW hosts (which may not trigger additional resize events)
+    // this explicit call ensures the chain is populated correctly.
+    refreshChainDisplay();
 
     startTimerHz(30);  // 30Hz for smooth level metering
 }
@@ -390,6 +481,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
 {
     audioProcessor.removeChangeListener(this);
     pluginSelector.removeListener(this);
+    typeFilter.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
     duckerToggleButton.removeListener(this);
@@ -434,14 +526,40 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
         seq.patternBox.removeListener(this);
     }
 
+    // Multiband cleanup
+    bandMainButton.removeListener(this);
+    bandLowButton.removeListener(this);
+    bandMidButton.removeListener(this);
+    bandHighButton.removeListener(this);
+    lowMidCrossoverSlider.removeListener(this);
+    midHighCrossoverSlider.removeListener(this);
+    for (int b = 0; b < 3; ++b)
+    {
+        bandSoloButtons[b].removeListener(this);
+        bandMuteButtons[b].removeListener(this);
+        bandGainSliders[b].removeListener(this);
+    }
+
     editorWindowCache.clear();
     audioProcessor.closeAllCLAPEditors();
 }
 
 void UhbikWrapperAudioProcessorEditor::timerCallback()
 {
-    auto chainSize = audioProcessor.getChainSize();
-    juce::String newStatus = juce::String(chainSize) + " effect(s) in chain";
+    auto& activeChain = getActiveChain();
+    int activeSize = static_cast<int>(activeChain.size());
+
+    juce::String newStatus;
+    if (activeBandIndex >= 0)
+    {
+        const char* bandLabels[] = {"LOW", "MID", "HIGH"};
+        newStatus = juce::String(bandLabels[activeBandIndex]) + " band: "
+                  + juce::String(activeSize) + " effect(s)";
+    }
+    else
+    {
+        newStatus = juce::String(activeSize) + " effect(s) in chain";
+    }
 
     if (statusMessage != newStatus)
     {
@@ -450,9 +568,9 @@ void UhbikWrapperAudioProcessorEditor::timerCallback()
     }
 
     // Update level meters for each slot
-    for (size_t i = 0; i < slotComponents.size() && i < static_cast<size_t>(chainSize); ++i)
+    for (size_t i = 0; i < slotComponents.size() && i < static_cast<size_t>(activeSize); ++i)
     {
-        auto& slot = audioProcessor.effectChain[i];
+        auto& slot = activeChain[i];
         slotComponents[i]->setLevels(
             slot.inputLevelL.load(),
             slot.inputLevelR.load(),
@@ -480,7 +598,7 @@ void UhbikWrapperAudioProcessorEditor::timerCallback()
 void UhbikWrapperAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     populatePluginSelector();  // Update dropdown (e.g., after deferred CLAP scan)
-    refreshChainDisplay();
+    resized();  // Full layout refresh ensures viewport is properly sized before chain display
 }
 
 void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
@@ -490,10 +608,23 @@ void UhbikWrapperAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
         int selectedIndex = pluginSelector.getSelectedItemIndex();
         if (selectedIndex >= 0 && selectedIndex < static_cast<int>(effectPlugins.size()))
         {
-            std::cerr << "[UI] Auto-adding plugin: " << effectPlugins[static_cast<size_t>(selectedIndex)].name << std::endl << std::flush;
-            audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
+            auto& desc = effectPlugins[static_cast<size_t>(selectedIndex)];
+            if (activeBandIndex >= 0)
+            {
+                std::cerr << "[UI] Adding plugin to band " << activeBandIndex << ": " << desc.name << std::endl << std::flush;
+                audioProcessor.addPluginToBand(activeBandIndex, desc);
+            }
+            else
+            {
+                std::cerr << "[UI] Adding plugin to main chain: " << desc.name << std::endl << std::flush;
+                audioProcessor.addPlugin(desc);
+            }
             pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification); // Reset selection
         }
+    }
+    else if (comboBox == &typeFilter)
+    {
+        populatePluginSelector();
     }
     else if (comboBox == &matrixSlotBox)
     {
@@ -556,8 +687,67 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
         int selectedIndex = pluginSelector.getSelectedItemIndex();
         if (selectedIndex >= 0 && selectedIndex < static_cast<int>(effectPlugins.size()))
         {
-            audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
+            if (activeBandIndex >= 0)
+                audioProcessor.addPluginToBand(activeBandIndex, effectPlugins[static_cast<size_t>(selectedIndex)]);
+            else
+                audioProcessor.addPlugin(effectPlugins[static_cast<size_t>(selectedIndex)]);
             pluginSelector.setSelectedItemIndex(-1, juce::dontSendNotification);
+        }
+    }
+    else if (button == &bandMainButton)
+    {
+        activeBandIndex = -1;
+        audioProcessor.multibandEnabled.store(false);
+        updateBandTabButtons();
+        resized();
+    }
+    else if (button == &bandLowButton)
+    {
+        activeBandIndex = 0;
+        audioProcessor.multibandEnabled.store(true);
+        updateBandTabButtons();
+        resized();
+    }
+    else if (button == &bandMidButton)
+    {
+        activeBandIndex = 1;
+        audioProcessor.multibandEnabled.store(true);
+        updateBandTabButtons();
+        resized();
+    }
+    else if (button == &bandHighButton)
+    {
+        activeBandIndex = 2;
+        audioProcessor.multibandEnabled.store(true);
+        updateBandTabButtons();
+        resized();
+    }
+    else if (button == &bandSoloButtons[0] || button == &bandSoloButtons[1] || button == &bandSoloButtons[2])
+    {
+        for (int b = 0; b < 3; ++b)
+        {
+            if (button == &bandSoloButtons[b])
+            {
+                bool newState = !audioProcessor.multibandProcessor.bandStates[b].solo.load();
+                audioProcessor.multibandProcessor.bandStates[b].solo.store(newState);
+                bandSoloButtons[b].setColour(juce::TextButton::buttonColourId,
+                    newState ? juce::Colour(0xffcccc44) : juce::Colour(0xff333333));
+                break;
+            }
+        }
+    }
+    else if (button == &bandMuteButtons[0] || button == &bandMuteButtons[1] || button == &bandMuteButtons[2])
+    {
+        for (int b = 0; b < 3; ++b)
+        {
+            if (button == &bandMuteButtons[b])
+            {
+                bool newState = !audioProcessor.multibandProcessor.bandStates[b].mute.load();
+                audioProcessor.multibandProcessor.bandStates[b].mute.store(newState);
+                bandMuteButtons[b].setColour(juce::TextButton::buttonColourId,
+                    newState ? juce::Colour(0xffcc4444) : juce::Colour(0xff333333));
+                break;
+            }
         }
     }
     else if (button == &viewMenuButton)
@@ -673,6 +863,28 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
 
 void UhbikWrapperAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
 {
+    // Multiband crossover sliders
+    if (slider == &lowMidCrossoverSlider)
+    {
+        audioProcessor.setLowMidCrossover(static_cast<float>(slider->getValue()));
+        return;
+    }
+    else if (slider == &midHighCrossoverSlider)
+    {
+        audioProcessor.setMidHighCrossover(static_cast<float>(slider->getValue()));
+        return;
+    }
+
+    // Band gain sliders
+    for (int b = 0; b < 3; ++b)
+    {
+        if (slider == &bandGainSliders[b])
+        {
+            audioProcessor.multibandProcessor.bandStates[b].gainDb.store(static_cast<float>(slider->getValue()));
+            return;
+        }
+    }
+
     if (slider == &duckerThresholdSlider)
         audioProcessor.duckerThresholdDb.store(static_cast<float>(slider->getValue()));
     else if (slider == &duckerAmountSlider)
@@ -950,23 +1162,35 @@ void UhbikWrapperAudioProcessorEditor::populatePluginSelector()
     // Get current filter selection (1=All, 2=CLAP, 3=VST3)
     int filterSelection = formatFilter.getSelectedId();
 
-    // Filter for effects only (no instruments) and by format
+    // Get current type filter (1=All, 2=Effects, 3=Instruments)
+    int typeSelection = typeFilter.getSelectedId();
+
+    // Apply format and type filters
     for (const auto& desc : allPlugins)
     {
-        if (desc.isInstrument)
-            continue;
-
         // Apply format filter
         if (filterSelection == 2 && desc.format != UnifiedPluginDescription::Format::CLAP)
             continue;
         if (filterSelection == 3 && desc.format != UnifiedPluginDescription::Format::VST3)
             continue;
 
+        // Apply type filter
+        if (typeSelection == 2 && desc.isInstrument)
+            continue;
+        if (typeSelection == 3 && !desc.isInstrument)
+            continue;
+
         effectPlugins.push_back(desc);
     }
 
+    // Sort alphabetically by name (case-insensitive)
+    std::sort(effectPlugins.begin(), effectPlugins.end(),
+        [](const UnifiedPluginDescription& a, const UnifiedPluginDescription& b) {
+            return a.name.compareIgnoreCase(b.name) < 0;
+        });
+
     const char* filterName = (filterSelection == 2) ? "CLAP" : (filterSelection == 3) ? "VST3" : "All";
-    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " effects (filter: " << filterName << ")" << std::endl << std::flush;
+    std::cerr << "[UI] Populating selector with " << effectPlugins.size() << " plugins (filter: " << filterName << ")" << std::endl << std::flush;
 
     int id = 1;
     for (const auto& desc : effectPlugins)
@@ -984,16 +1208,31 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
     slotComponents.clear();
 
     // Clean up VST3 editor windows for plugins that no longer exist
-    // Just hide them and remove from cache - let natural destruction happen
     for (auto it = editorWindowCache.begin(); it != editorWindowCache.end(); )
     {
         bool found = false;
+        // Check main chain
         for (int i = 0; i < audioProcessor.getChainSize(); ++i)
         {
             if (audioProcessor.getPluginAt(i) == it->first)
             {
                 found = true;
                 break;
+            }
+        }
+        // Check band chains
+        if (!found)
+        {
+            for (int b = 0; b < MultibandProcessor::NUM_BANDS && !found; ++b)
+            {
+                for (auto& slot : audioProcessor.bandChains[b])
+                {
+                    if (slot.vst3Plugin.get() == it->first)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
             }
         }
         if (!found)
@@ -1006,17 +1245,18 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
             ++it;
     }
 
-    // Note: CLAP editor windows are cleaned up automatically when plugins are removed
+    // Get the active chain (single-chain or current band)
+    auto& activeChain = getActiveChain();
+    int chainSize = static_cast<int>(activeChain.size());
 
-    int chainSize = audioProcessor.getChainSize();
-    int slotHeight = 60;
+    int slotHeight = 75;
     int slotSpacing = 4;
     int leftPadding = 8;
-    int rightPadding = 20;  // More space for scrollbar
+    int rightPadding = 20;
     int topPadding = 8;
 
     int containerWidth = chainViewport.getWidth();
-    if (containerWidth < 100) containerWidth = 300;  // Fallback if not yet sized
+    if (containerWidth < 100) containerWidth = 500;
 
     chainContainer.setSize(
         containerWidth - rightPadding,
@@ -1025,7 +1265,7 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
 
     for (int i = 0; i < chainSize; ++i)
     {
-        auto& slot = audioProcessor.effectChain[static_cast<size_t>(i)];
+        auto& slot = activeChain[static_cast<size_t>(i)];
         bool canMoveUp = (i > 0);
         bool canMoveDown = (i < chainSize - 1);
         auto slotComp = std::make_unique<EffectSlotComponent>(
@@ -1051,16 +1291,18 @@ void UhbikWrapperAudioProcessorEditor::refreshChainDisplay()
 void UhbikWrapperAudioProcessorEditor::effectSlotEditClicked(int slotIndex)
 {
     std::cerr << "[UI] Edit clicked for slot: " << slotIndex << std::endl << std::flush;
+    // openPluginEditor works with the active chain
     openPluginEditor(slotIndex);
 }
 
 void UhbikWrapperAudioProcessorEditor::effectSlotBypassClicked(int slotIndex)
 {
     std::cerr << "[UI] Bypass clicked for slot: " << slotIndex << std::endl << std::flush;
-    if (slotIndex >= 0 && slotIndex < audioProcessor.getChainSize())
+    auto& chain = getActiveChain();
+    if (slotIndex >= 0 && slotIndex < static_cast<int>(chain.size()))
     {
-        bool currentBypass = audioProcessor.effectChain[static_cast<size_t>(slotIndex)].bypassed;
-        audioProcessor.setPluginBypassed(slotIndex, !currentBypass);
+        chain[static_cast<size_t>(slotIndex)].bypassed = !chain[static_cast<size_t>(slotIndex)].bypassed;
+        audioProcessor.sendChangeMessage();
     }
 }
 
@@ -1068,10 +1310,19 @@ void UhbikWrapperAudioProcessorEditor::effectSlotRemoveClicked(int slotIndex)
 {
     std::cerr << "[UI] Remove clicked for slot: " << slotIndex << std::endl << std::flush;
 
-    // Use async call to avoid issues with deleting while in callback
-    juce::MessageManager::callAsync([this, slotIndex]() {
-        audioProcessor.removePlugin(slotIndex);
-    });
+    if (activeBandIndex >= 0)
+    {
+        int band = activeBandIndex;
+        juce::MessageManager::callAsync([this, band, slotIndex]() {
+            audioProcessor.removePluginFromBand(band, slotIndex);
+        });
+    }
+    else
+    {
+        juce::MessageManager::callAsync([this, slotIndex]() {
+            audioProcessor.removePlugin(slotIndex);
+        });
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::effectSlotMoveUpClicked(int slotIndex)
@@ -1079,41 +1330,66 @@ void UhbikWrapperAudioProcessorEditor::effectSlotMoveUpClicked(int slotIndex)
     std::cerr << "[UI] Move up clicked for slot: " << slotIndex << std::endl << std::flush;
     if (slotIndex > 0)
     {
-        juce::MessageManager::callAsync([this, slotIndex]() {
-            audioProcessor.movePlugin(slotIndex, slotIndex - 1);
-        });
+        if (activeBandIndex >= 0)
+        {
+            int band = activeBandIndex;
+            juce::MessageManager::callAsync([this, band, slotIndex]() {
+                audioProcessor.movePluginInBand(band, slotIndex, slotIndex - 1);
+            });
+        }
+        else
+        {
+            juce::MessageManager::callAsync([this, slotIndex]() {
+                audioProcessor.movePlugin(slotIndex, slotIndex - 1);
+            });
+        }
     }
 }
 
 void UhbikWrapperAudioProcessorEditor::effectSlotMoveDownClicked(int slotIndex)
 {
     std::cerr << "[UI] Move down clicked for slot: " << slotIndex << std::endl << std::flush;
-    if (slotIndex < audioProcessor.getChainSize() - 1)
+    if (slotIndex < getActiveChainSize() - 1)
     {
-        juce::MessageManager::callAsync([this, slotIndex]() {
-            audioProcessor.movePlugin(slotIndex, slotIndex + 1);
-        });
+        if (activeBandIndex >= 0)
+        {
+            int band = activeBandIndex;
+            juce::MessageManager::callAsync([this, band, slotIndex]() {
+                audioProcessor.movePluginInBand(band, slotIndex, slotIndex + 1);
+            });
+        }
+        else
+        {
+            juce::MessageManager::callAsync([this, slotIndex]() {
+                audioProcessor.movePlugin(slotIndex, slotIndex + 1);
+            });
+        }
     }
 }
 
 void UhbikWrapperAudioProcessorEditor::effectSlotMixChanged(int slotIndex, float inputGainDb, float outputGainDb, float mixPercent)
 {
-    audioProcessor.setSlotInputGain(slotIndex, inputGainDb);
-    audioProcessor.setSlotOutputGain(slotIndex, outputGainDb);
-    audioProcessor.setSlotMix(slotIndex, mixPercent);
+    auto& chain = getActiveChain();
+    if (slotIndex >= 0 && slotIndex < static_cast<int>(chain.size()))
+    {
+        chain[static_cast<size_t>(slotIndex)].inputGainDb.store(juce::jlimit(-24.0f, 24.0f, inputGainDb));
+        chain[static_cast<size_t>(slotIndex)].outputGainDb.store(juce::jlimit(-24.0f, 24.0f, outputGainDb));
+        chain[static_cast<size_t>(slotIndex)].mixPercent.store(juce::jlimit(0.0f, 100.0f, mixPercent));
+    }
 }
 
 void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
 {
     std::cerr << "[UI] openPluginEditor called for slot: " << slotIndex << std::endl << std::flush;
 
-    if (slotIndex < 0 || slotIndex >= audioProcessor.getChainSize())
+    auto& activeChain = getActiveChain();
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(activeChain.size()))
     {
         std::cerr << "[UI] Invalid slot index" << std::endl << std::flush;
         return;
     }
 
-    auto& slot = audioProcessor.effectChain[static_cast<size_t>(slotIndex)];
+    auto& slot = activeChain[static_cast<size_t>(slotIndex)];
     std::cerr << "[UI] Slot: isCLAP=" << slot.isCLAP() << " isVST3=" << slot.isVST3()
               << " hasPlugin=" << slot.hasPlugin() << std::endl << std::flush;
 
@@ -1145,7 +1421,7 @@ void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
     }
 
     // Handle VST3 plugins
-    auto* plugin = audioProcessor.getPluginAt(slotIndex);
+    auto* plugin = slot.vst3Plugin.get();
     if (plugin == nullptr || !plugin->hasEditor())
         return;
 
@@ -1346,13 +1622,22 @@ void UhbikWrapperAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawFittedText(statusMessage, browserWidth + 220, getHeight() - 30, getWidth() - browserWidth - 240, 30, juce::Justification::centred, 1);
 
     // Empty state message
-    if (audioProcessor.getChainSize() == 0)
+    if (getActiveChainSize() == 0)
     {
         auto emptyBounds = chainViewport.getBounds();
         g.setColour(juce::Colour(0xff666666));
         g.setFont(16.0f);
-        g.drawFittedText("Select a plugin from the dropdown to add to the rack",
-                         emptyBounds, juce::Justification::centred, 2);
+        if (activeBandIndex >= 0)
+        {
+            const char* bandLabels[] = {"LOW", "MID", "HIGH"};
+            g.drawFittedText(juce::String("Select a plugin to add to the ") + bandLabels[activeBandIndex] + " band",
+                             emptyBounds, juce::Justification::centred, 2);
+        }
+        else
+        {
+            g.drawFittedText("Select a plugin from the dropdown to add to the rack",
+                             emptyBounds, juce::Justification::centred, 2);
+        }
     }
 }
 
@@ -1372,14 +1657,7 @@ void UhbikWrapperAudioProcessorEditor::resized()
     auto headerBounds = bounds.removeFromTop(50);
     int buttonY = 11;  // Center buttons vertically in 50px header
 
-    // Right side: [selector] [+]
-    int addBtnWidth = 40;
-    int selectorWidth = juce::jmin(200, bounds.getWidth() / 3);
-
-    addButton.setBounds(getWidth() - addBtnWidth - 15, buttonY, addBtnWidth, 28);
-    pluginSelector.setBounds(addButton.getX() - selectorWidth - 6, buttonY, selectorWidth, 28);
-
-    // View menu button after title (EFFECT RACK is at browserWidth + 15, ~140px wide)
+    // View menu button after title
     viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
 
     // Footer area
@@ -1564,6 +1842,69 @@ void UhbikWrapperAudioProcessorEditor::resized()
             matrixRoutesLabel.setBounds(listX, contentY, listWidth, 16);
             matrixRoutesList.setBounds(listX, contentY + 18, listWidth, modExpandedHeight - 25);
         }
+    }
+
+    // Band tab bar (always visible between header and chain viewport)
+    {
+        int mbX = bounds.getX() + 15;
+
+        // --- Row 1: Tab buttons [MAIN] [LOW] [MID] [HIGH] + plugin selector ---
+        int row1Height = 32;
+        auto row1 = bounds.removeFromTop(row1Height);
+        int tabY = row1.getY() + 2;
+        int tabWidth = 70;
+        int tabHeight = 28;
+
+        bandMainButton.setBounds(mbX, tabY, tabWidth, tabHeight);
+        bandLowButton.setBounds(mbX + (tabWidth + 4), tabY, tabWidth, tabHeight);
+        bandMidButton.setBounds(mbX + 2 * (tabWidth + 4), tabY, tabWidth, tabHeight);
+        bandHighButton.setBounds(mbX + 3 * (tabWidth + 4), tabY, tabWidth, tabHeight);
+
+        // Type filter + plugin selector to the right of tabs
+        int typeFilterWidth = 95;
+        int typeFilterX = mbX + 4 * (tabWidth + 4) + 15;
+        typeFilter.setBounds(typeFilterX, tabY, typeFilterWidth, tabHeight);
+
+        int selectorX = typeFilterX + typeFilterWidth + 4;
+        int addBtnWidth = 40;
+        int selectorWidth = juce::jmax(120, row1.getRight() - selectorX - addBtnWidth - 25);
+        pluginSelector.setBounds(selectorX, tabY, selectorWidth, tabHeight);
+        addButton.setBounds(selectorX + selectorWidth + 4, tabY, addBtnWidth, tabHeight);
+
+        // --- Row 2: Band controls (crossovers + S/M/gain) — only on band tabs ---
+        if (activeBandIndex >= 0)
+        {
+            int row2Height = 30;
+            auto row2 = bounds.removeFromTop(row2Height);
+            int r2Y = row2.getY() + 2;
+
+            // S/M buttons for active band
+            int smBtnW = 32;
+            int smBtnH = 24;
+            int b = activeBandIndex;
+            bandSoloButtons[b].setBounds(mbX, r2Y, smBtnW, smBtnH);
+            bandMuteButtons[b].setBounds(mbX + smBtnW + 4, r2Y, smBtnW, smBtnH);
+
+            // Gain slider
+            int gainX = mbX + 2 * (smBtnW + 4) + 10;
+            int gainW = 140;
+            bandGainSliders[b].setBounds(gainX, r2Y, gainW, smBtnH);
+
+            // Crossover sliders to the right
+            int crossoverX = gainX + gainW + 20;
+            int sliderW = 110;
+            lowMidCrossoverLabel.setBounds(crossoverX, r2Y, 50, smBtnH);
+            lowMidCrossoverSlider.setBounds(crossoverX + 50, r2Y, sliderW, smBtnH);
+
+            int cross2X = crossoverX + 50 + sliderW + 10;
+            midHighCrossoverLabel.setBounds(cross2X, r2Y, 55, smBtnH);
+            midHighCrossoverSlider.setBounds(cross2X + 55, r2Y, sliderW, smBtnH);
+        }
+
+        // --- Row 3: Chain label (24px) ---
+        int row3Height = 24;
+        auto row3 = bounds.removeFromTop(row3Height);
+        bandChainLabel.setBounds(row3.getX() + 15, row3.getY(), row3.getWidth() - 30, row3Height);
     }
 
     // Rack rails
@@ -1772,4 +2113,116 @@ void UhbikWrapperAudioProcessorEditor::initPresetRequested()
     juce::MessageManager::callAsync([this]() {
         audioProcessor.clearChain();
     });
+}
+
+// --- Multiband UI Methods ---
+
+std::vector<EffectSlot>& UhbikWrapperAudioProcessorEditor::getActiveChain()
+{
+    if (activeBandIndex >= 0)
+        return audioProcessor.bandChains[activeBandIndex];
+    return audioProcessor.effectChain;
+}
+
+int UhbikWrapperAudioProcessorEditor::getActiveChainSize()
+{
+    if (activeBandIndex >= 0)
+        return audioProcessor.getBandChainSize(activeBandIndex);
+    return audioProcessor.getChainSize();
+}
+
+void UhbikWrapperAudioProcessorEditor::updateMultibandUI()
+{
+    // Tab buttons are always visible
+    bandMainButton.setVisible(true);
+    bandLowButton.setVisible(true);
+    bandMidButton.setVisible(true);
+    bandHighButton.setVisible(true);
+    bandChainLabel.setVisible(true);
+
+    // Band-specific controls only visible when a band tab is selected (not MAIN)
+    bool onBandTab = (activeBandIndex >= 0);
+    lowMidCrossoverSlider.setVisible(onBandTab);
+    midHighCrossoverSlider.setVisible(onBandTab);
+    lowMidCrossoverLabel.setVisible(onBandTab);
+    midHighCrossoverLabel.setVisible(onBandTab);
+
+    for (int b = 0; b < 3; ++b)
+    {
+        bool showBand = onBandTab && (b == activeBandIndex);
+        bandSoloButtons[b].setVisible(showBand);
+        bandMuteButtons[b].setVisible(showBand);
+        bandGainSliders[b].setVisible(showBand);
+    }
+
+    updateBandTabButtons();
+}
+
+void UhbikWrapperAudioProcessorEditor::updateBandTabButtons()
+{
+    juce::Colour bandActiveColours[] = {
+        juce::Colour(0xff4488cc),  // Low - blue
+        juce::Colour(0xff44aa44),  // Mid - green
+        juce::Colour(0xffcc6644)   // High - orange
+    };
+    juce::Colour mainActiveColour(0xff888888);
+    juce::Colour inactiveColour(0xff444444);
+    const char* bandLabels[] = {"LOW", "MID", "HIGH"};
+
+    // MAIN tab highlight
+    bandMainButton.setColour(juce::TextButton::buttonColourId,
+        activeBandIndex == -1 ? mainActiveColour : inactiveColour);
+
+    // Band tabs highlight
+    juce::TextButton* btns[] = { &bandLowButton, &bandMidButton, &bandHighButton };
+    for (int b = 0; b < 3; ++b)
+    {
+        btns[b]->setColour(juce::TextButton::buttonColourId,
+            b == activeBandIndex ? bandActiveColours[b] : inactiveColour);
+
+        // Only show the active band's S/M/Gain controls
+        bool showBand = (b == activeBandIndex);
+        bandSoloButtons[b].setVisible(showBand);
+        bandMuteButtons[b].setVisible(showBand);
+        bandGainSliders[b].setVisible(showBand);
+    }
+
+    // Band-specific controls visibility
+    bool onBandTab = (activeBandIndex >= 0);
+    lowMidCrossoverSlider.setVisible(onBandTab);
+    midHighCrossoverSlider.setVisible(onBandTab);
+    lowMidCrossoverLabel.setVisible(onBandTab);
+    midHighCrossoverLabel.setVisible(onBandTab);
+
+    if (activeBandIndex >= 0)
+    {
+        // Update S/M button colors to reflect the active band's current state
+        bool soloed = audioProcessor.multibandProcessor.bandStates[activeBandIndex].solo.load();
+        bool muted = audioProcessor.multibandProcessor.bandStates[activeBandIndex].mute.load();
+        bandSoloButtons[activeBandIndex].setColour(juce::TextButton::buttonColourId,
+            soloed ? juce::Colour(0xffcccc44) : juce::Colour(0xff333333));
+        bandMuteButtons[activeBandIndex].setColour(juce::TextButton::buttonColourId,
+            muted ? juce::Colour(0xffcc4444) : juce::Colour(0xff333333));
+
+        // Sync gain slider value from processor state
+        bandGainSliders[activeBandIndex].setValue(
+            audioProcessor.multibandProcessor.bandStates[activeBandIndex].gainDb.load(),
+            juce::dontSendNotification);
+
+        // Band chain label
+        int bandSize = audioProcessor.getBandChainSize(activeBandIndex);
+        juce::String labelText = juce::String(bandLabels[activeBandIndex]) + " Band ("
+                               + juce::String(bandSize) + " effect" + (bandSize != 1 ? "s" : "") + ")";
+        bandChainLabel.setText(labelText, juce::dontSendNotification);
+        bandChainLabel.setColour(juce::Label::textColourId, bandActiveColours[activeBandIndex]);
+    }
+    else
+    {
+        // MAIN tab - show main chain info
+        int chainSize = audioProcessor.getChainSize();
+        juce::String labelText = juce::String("Main Chain (")
+                               + juce::String(chainSize) + " effect" + (chainSize != 1 ? "s" : "") + ")";
+        bandChainLabel.setText(labelText, juce::dontSendNotification);
+        bandChainLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
+    }
 }

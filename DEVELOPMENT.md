@@ -13,6 +13,7 @@ Planned enhancements to add DAW parameter exposure, macro controls, and visualiz
 - **Wet/Dry mix** per effect
 - **Input/Output gain** controls
 - **MIDI Learn** for macro knobs
+- **Multiband processing** - split signal into frequency bands with independent effect chains (like Kilohearts Multipass)
 
 ---
 
@@ -212,6 +213,44 @@ void handleMidiLearn(const juce::MidiMessage& msg)
 }
 ```
 
+### Phase 7: Multiband Processing ✅ IMPLEMENTED
+
+**Goal:** Split audio into frequency bands, each with its own independent effect chain (inspired by Kilohearts Multipass)
+
+**Requested by:** KVR user Dirtgrain (Jan 2026)
+
+**Status:** Fully implemented. MAIN/LOW/MID/HIGH tab interface with independent effect chains per band.
+
+**Implementation:**
+- `MultibandProcessor` class (`Source/MultibandProcessor.h/.cpp`) encapsulates crossover logic
+- Linkwitz-Riley 24dB/oct (4th order) crossover filters for phase-coherent band splitting
+- 3 fixed bands: Low, Mid, High with 2 adjustable crossover frequencies
+- Per-band independent effect chains (`bandChains[3]` in PluginProcessor)
+- Per-band gain (-24 to +24 dB), solo, and mute controls
+- Pre-allocated band buffers to avoid audio-thread allocations
+- Per-sample crossover processing via `processSample()` for zero-allocation operation
+- State serialization v5 with full backward compatibility (v4 presets load normally)
+
+**Crossover topology:**
+```
+Input ──┬── LP1(lowMidFreq) ──────────────────→ Low band
+        └── HP1(lowMidFreq) ──┬── LP2(midHighFreq) ─→ Mid band
+                               └── HP2(midHighFreq) ─→ High band
+```
+
+**UI:**
+- MAIN / LOW / MID / HIGH tab buttons (always visible, color-coded) to switch displayed chain
+- MAIN tab shows single-chain mode; LOW/MID/HIGH tabs enable multiband processing
+- Crossover frequency sliders with logarithmic skew
+- Per-band Solo (S), Mute (M), and gain slider controls
+- Plugin type filter dropdown (All/Effects/Instruments) with alphabetical sorting
+- Existing chain viewport shows the active band's effect chain
+
+**Files:**
+- `Source/MultibandProcessor.h` / `.cpp` — Crossover filter class
+- `Source/PluginProcessor.h` / `.cpp` — Band chains, multiband processBlock path, state v5
+- `Source/PluginEditor.h` / `.cpp` — Band selector UI, mode-aware chain display
+
 ---
 
 ## UI Layout (Target)
@@ -253,12 +292,17 @@ Legend:
 11. **Phase 5a**: Create SpectrumAnalyzer component (requires juce_dsp)
 12. **Phase 5b**: Add spectrum popup windows
 13. **Phase 6**: Implement MIDI learn system
+14. ~~**Phase 7a**: Create crossover filter system (Linkwitz-Riley)~~ ✅
+15. ~~**Phase 7b**: Implement per-band effect chains~~ ✅
+16. ~~**Phase 7c**: Build multiband UI with band tabs and crossover sliders~~ ✅
+17. ~~**Phase 7d**: MAIN/LOW/MID/HIGH tab interface (replaces toggle)~~ ✅
+18. ~~**Phase 8**: Plugin type filter (All/Effects/Instruments) and alphabetical sorting~~ ✅
 
 ---
 
 ## Dependencies
 
-- Add `juce_dsp` module to CMakeLists.txt for FFT/spectrum analyzer
+- Add `juce_dsp` module to CMakeLists.txt for FFT/spectrum analyzer and Linkwitz-Riley crossover filters
 - No external dependencies required
 
 ## Technical Notes

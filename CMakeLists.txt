@@ -65,6 +65,8 @@ target_sources(UhbikWrapper PRIVATE
     Source/PresetBrowser.h
     Source/CLAPPluginHost.cpp
     Source/CLAPPluginHost.h
+    Source/MultibandProcessor.cpp
+    Source/MultibandProcessor.h
 )
 
 target_compile_definitions(UhbikWrapper PUBLIC
@@ -83,6 +85,7 @@ target_link_libraries(UhbikWrapper PRIVATE
     # Essential JUCE modules for a plugin that hosts other plugins
     juce::juce_audio_utils
     juce::juce_audio_processors
+    juce::juce_dsp
     juce::juce_core
     juce::juce_data_structures
     juce::juce_events
