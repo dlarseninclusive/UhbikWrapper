@@ -114,9 +114,20 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
             );
 
             juce::String pluginName;
-            while (scanner.scanNextFile(true, pluginName))
+            try
             {
-                DBG("Found VST3: " + pluginName);
+                while (scanner.scanNextFile(true, pluginName))
+                {
+                    DBG("Found VST3: " + pluginName);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "[RACK] VST3 scan exception for " << pluginName << ": " << e.what() << std::endl;
+            }
+            catch (...)
+            {
+                std::cerr << "[RACK] VST3 scan unknown exception for " << pluginName << std::endl;
             }
         }
     }
@@ -411,6 +422,190 @@ void UhbikWrapperAudioProcessor::closeAllCLAPEditors()
         if (slot.clapPlugin)
             slot.clapPlugin->closeEditor();
     }
+
+    // Also close CLAP editors in band chains
+    for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+    {
+        for (auto& slot : bandChains[b])
+        {
+            if (slot.clapPlugin)
+                slot.clapPlugin->closeEditor();
+        }
+    }
+}
+
+// --- Multiband Chain Management ---
+
+void UhbikWrapperAudioProcessor::addPluginToBand(int bandIndex, const UnifiedPluginDescription& desc)
+{
+    if (bandIndex < 0 || bandIndex >= MultibandProcessor::NUM_BANDS)
+        return;
+
+    if (desc.format == UnifiedPluginDescription::Format::CLAP)
+    {
+        if (debugLogging.load())
+            std::cerr << "[RACK] Adding CLAP plugin to band " << bandIndex << ": " << desc.name << std::endl << std::flush;
+
+        auto clapPlugin = std::make_unique<CLAPPluginInstance>(desc.clapDesc);
+
+        if (!clapPlugin->load())
+        {
+            if (debugLogging.load())
+                std::cerr << "[RACK] Failed to load CLAP plugin for band" << std::endl << std::flush;
+            sendChangeMessage();
+            return;
+        }
+
+        double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        int bs = getBlockSize() > 0 ? getBlockSize() : 512;
+
+        if (!clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
+        {
+            if (debugLogging.load())
+                std::cerr << "[RACK] Failed to activate CLAP plugin for band" << std::endl << std::flush;
+            sendChangeMessage();
+            return;
+        }
+
+        EffectSlot slot;
+        slot.clapPlugin = std::move(clapPlugin);
+        slot.description = desc;
+        slot.bypassed = false;
+        slot.ready.store(true);
+
+        {
+            const juce::SpinLock::ScopedLockType lock(chainLock);
+            bandChains[bandIndex].push_back(std::move(slot));
+        }
+    }
+    else
+    {
+        if (debugLogging.load())
+            std::cerr << "[RACK] Adding VST3 plugin to band " << bandIndex << ": " << desc.name << std::endl << std::flush;
+
+        juce::String errorMsg;
+        auto plugin = pluginFormatManager.createPluginInstance(
+            desc.vst3Desc,
+            getSampleRate() > 0 ? getSampleRate() : 44100.0,
+            getBlockSize() > 0 ? getBlockSize() : 512,
+            errorMsg
+        );
+
+        if (plugin != nullptr)
+        {
+            // Enable sidechain if available
+            if (plugin->getBusCount(true) > 1)
+            {
+                auto* pluginSidechain = plugin->getBus(true, 1);
+                if (pluginSidechain != nullptr)
+                    pluginSidechain->enable(true);
+            }
+
+            double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+            int bs = getBlockSize() > 0 ? getBlockSize() : 512;
+            plugin->prepareToPlay(sr, bs);
+
+            EffectSlot slot;
+            slot.vst3Plugin = std::move(plugin);
+            slot.description = desc;
+            slot.bypassed = false;
+            slot.ready.store(true);
+
+            {
+                const juce::SpinLock::ScopedLockType lock(chainLock);
+                bandChains[bandIndex].push_back(std::move(slot));
+            }
+        }
+        else
+        {
+            if (debugLogging.load())
+                std::cerr << "[RACK] Failed to create VST3 plugin for band: " << errorMsg << std::endl << std::flush;
+        }
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Band " << bandIndex << " chain size: " << bandChains[bandIndex].size() << std::endl << std::flush;
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::removePluginFromBand(int bandIndex, int slotIndex)
+{
+    if (bandIndex < 0 || bandIndex >= MultibandProcessor::NUM_BANDS)
+        return;
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(bandChains[bandIndex].size()))
+        return;
+
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        bandChains[bandIndex].erase(bandChains[bandIndex].begin() + slotIndex);
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Removed plugin from band " << bandIndex << ". Size: " << bandChains[bandIndex].size() << std::endl << std::flush;
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::movePluginInBand(int bandIndex, int fromIndex, int toIndex)
+{
+    if (bandIndex < 0 || bandIndex >= MultibandProcessor::NUM_BANDS)
+        return;
+
+    auto& chain = bandChains[bandIndex];
+    if (fromIndex >= 0 && fromIndex < static_cast<int>(chain.size()) &&
+        toIndex >= 0 && toIndex < static_cast<int>(chain.size()) &&
+        fromIndex != toIndex)
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        auto slot = std::move(chain[static_cast<size_t>(fromIndex)]);
+        chain.erase(chain.begin() + fromIndex);
+        chain.insert(chain.begin() + toIndex, std::move(slot));
+        sendChangeMessage();
+    }
+}
+
+void UhbikWrapperAudioProcessor::clearBand(int bandIndex)
+{
+    if (bandIndex < 0 || bandIndex >= MultibandProcessor::NUM_BANDS)
+        return;
+
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        bandChains[bandIndex].clear();
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] Band " << bandIndex << " cleared" << std::endl << std::flush;
+    sendChangeMessage();
+}
+
+void UhbikWrapperAudioProcessor::clearAllBands()
+{
+    {
+        const juce::SpinLock::ScopedLockType lock(chainLock);
+        for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+            bandChains[b].clear();
+    }
+
+    if (debugLogging.load())
+        std::cerr << "[RACK] All bands cleared" << std::endl << std::flush;
+    sendChangeMessage();
+}
+
+int UhbikWrapperAudioProcessor::getBandChainSize(int bandIndex) const
+{
+    if (bandIndex < 0 || bandIndex >= MultibandProcessor::NUM_BANDS)
+        return 0;
+    return static_cast<int>(bandChains[bandIndex].size());
+}
+
+void UhbikWrapperAudioProcessor::setLowMidCrossover(float freqHz)
+{
+    multibandProcessor.setLowMidCrossover(freqHz);
+}
+
+void UhbikWrapperAudioProcessor::setMidHighCrossover(float freqHz)
+{
+    multibandProcessor.setMidHighCrossover(freqHz);
 }
 
 // --- Modulation System Implementation ---
@@ -752,6 +947,28 @@ void UhbikWrapperAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
             slot.clapPlugin->activate(sampleRate, 1, static_cast<uint32_t>(samplesPerBlock));
         }
     }
+
+    // Prepare multiband processor and band buffers
+    multibandProcessor.prepare(sampleRate, samplesPerBlock);
+    for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+    {
+        bandBuffers[b].setSize(2, samplesPerBlock, false, false, true);
+
+        // Prepare plugins in each band chain
+        for (auto& slot : bandChains[b])
+        {
+            if (slot.vst3Plugin != nullptr)
+            {
+                slot.vst3Plugin->prepareToPlay(sampleRate, samplesPerBlock);
+            }
+            else if (slot.clapPlugin != nullptr)
+            {
+                if (slot.clapPlugin->isActive())
+                    slot.clapPlugin->deactivate();
+                slot.clapPlugin->activate(sampleRate, 1, static_cast<uint32_t>(samplesPerBlock));
+            }
+        }
+    }
 }
 
 void UhbikWrapperAudioProcessor::releaseResources()
@@ -760,14 +977,24 @@ void UhbikWrapperAudioProcessor::releaseResources()
     for (auto& slot : effectChain)
     {
         if (slot.vst3Plugin != nullptr)
-        {
             slot.vst3Plugin->releaseResources();
-        }
         else if (slot.clapPlugin != nullptr)
-        {
             slot.clapPlugin->deactivate();
+    }
+
+    // Release band chain plugins
+    for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+    {
+        for (auto& slot : bandChains[b])
+        {
+            if (slot.vst3Plugin != nullptr)
+                slot.vst3Plugin->releaseResources();
+            else if (slot.clapPlugin != nullptr)
+                slot.clapPlugin->deactivate();
         }
     }
+
+    multibandProcessor.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -796,72 +1023,20 @@ bool UhbikWrapperAudioProcessor::isBusesLayoutSupported (const BusesLayout& layo
 }
 #endif
 
-void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+// Shared helper: processes an effect chain on a buffer
+// Used for both single-chain mode and per-band processing in multiband mode
+void UhbikWrapperAudioProcessor::processEffectChain(
+    std::vector<EffectSlot>& chain,
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer& midi,
+    int numSamples,
+    bool hasSidechainInput,
+    int numBufferChannels)
 {
-    static int processCallCount = 0;
-    if (processCallCount < 5)
-    {
-        std::cerr << "[RACK] processBlock #" << processCallCount << " samples=" << buffer.getNumSamples() << std::endl << std::flush;
-        processCallCount++;
-    }
-
-    juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels  = getTotalNumInputChannels();
-    auto totalNumOutputChannels = getTotalNumOutputChannels();
-
-    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear (i, 0, buffer.getNumSamples());
-
-    // Try to acquire lock - if chain is being modified, skip this block
-    const juce::SpinLock::ScopedTryLockType lock(chainLock);
-    if (!lock.isLocked())
-        return;
-
-    // Get parameter values
-    float inputGainDb = apvts.getRawParameterValue("inputGain")->load();
-    float outputGainDb = apvts.getRawParameterValue("outputGain")->load();
-    float mixPercent = apvts.getRawParameterValue("mix")->load();
-
-    float inputGain = juce::Decibels::decibelsToGain(inputGainDb);
-    float outputGain = juce::Decibels::decibelsToGain(outputGainDb);
-    float wetMix = mixPercent / 100.0f;
-    float dryMix = 1.0f - wetMix;
-
-    // Check if we have sidechain input (buffer has more than 2 channels)
-    const int numBufferChannels = buffer.getNumChannels();
-    const int mainChannels = 2;  // Stereo main
-    const bool hasSidechainInput = (numBufferChannels > mainChannels);
-    const int numSamples = buffer.getNumSamples();
-
-    // Store dry signal for mix
-    juce::AudioBuffer<float> dryBuffer;
-    if (dryMix > 0.0f)
-    {
-        dryBuffer.setSize(mainChannels, numSamples, false, false, true);
-        for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
-            dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
-    }
-
-    // Apply input gain to main channels only
-    for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
-        buffer.applyGain(ch, 0, numSamples, inputGain);
-
-    // Measure master input levels (after input gain)
-    if (numBufferChannels >= 2)
-    {
-        float peakL = buffer.getMagnitude(0, 0, numSamples);
-        float peakR = buffer.getMagnitude(1, 0, numSamples);
-        // Simple peak hold with decay
-        float currentL = masterInputLevelL.load();
-        float currentR = masterInputLevelR.load();
-        masterInputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
-        masterInputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
-    }
-
-    // Process each effect in the chain
+    const int mainChannels = 2;
     juce::AudioBuffer<float> slotDryBuffer(mainChannels, numSamples);
 
-    for (auto& slot : effectChain)
+    for (auto& slot : chain)
     {
         if (slot.hasPlugin() && slot.ready.load() && !slot.bypassed)
         {
@@ -909,13 +1084,13 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     {
                         float* channelData[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
                         juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
-                        slot.vst3Plugin->processBlock(mainBuffer, midiMessages);
+                        slot.vst3Plugin->processBlock(mainBuffer, midi);
                     }
                 }
                 else if (hasSidechainInput && numBufferChannels >= 4)
                 {
                     // Plugin uses sidechain and we have sidechain input - pass full buffer
-                    slot.vst3Plugin->processBlock(buffer, midiMessages);
+                    slot.vst3Plugin->processBlock(buffer, midi);
                 }
                 else
                 {
@@ -931,7 +1106,7 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     pluginBuffer.clear(2, 0, numSamples);
                     pluginBuffer.clear(3, 0, numSamples);
 
-                    slot.vst3Plugin->processBlock(pluginBuffer, midiMessages);
+                    slot.vst3Plugin->processBlock(pluginBuffer, midi);
 
                     // Copy processed main channels back
                     buffer.copyFrom(0, 0, pluginBuffer, 0, 0, numSamples);
@@ -954,7 +1129,7 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     juce::AudioBuffer<float> mainBuffer(channelData, mainChannels, numSamples);
 
                     // Get current slot index for modulation routing
-                    int currentSlotIndex = static_cast<int>(&slot - effectChain.data());
+                    int currentSlotIndex = static_cast<int>(&slot - chain.data());
 
                     // Generate modulation events for this slot
                     // Pre-allocate to avoid audio-thread allocation (max: routes * blocks)
@@ -1041,9 +1216,9 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                     // Process with modulation events
                     if (modEvents.empty())
-                        slot.clapPlugin->process(mainBuffer, midiMessages);
+                        slot.clapPlugin->process(mainBuffer, midi);
                     else
-                        slot.clapPlugin->processWithModulation(mainBuffer, midiMessages, modEvents);
+                        slot.clapPlugin->processWithModulation(mainBuffer, midi, modEvents);
                 }
             }
 
@@ -1075,6 +1250,94 @@ void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 slot.outputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
             }
         }
+    }
+}
+
+void UhbikWrapperAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+{
+    static int processCallCount = 0;
+    if (processCallCount < 5)
+    {
+        std::cerr << "[RACK] processBlock #" << processCallCount << " samples=" << buffer.getNumSamples() << std::endl << std::flush;
+        processCallCount++;
+    }
+
+    juce::ScopedNoDenormals noDenormals;
+    auto totalNumInputChannels  = getTotalNumInputChannels();
+    auto totalNumOutputChannels = getTotalNumOutputChannels();
+
+    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
+        buffer.clear (i, 0, buffer.getNumSamples());
+
+    // Try to acquire lock - if chain is being modified, skip this block
+    const juce::SpinLock::ScopedTryLockType lock(chainLock);
+    if (!lock.isLocked())
+        return;
+
+    // Get parameter values
+    float inputGainDb = apvts.getRawParameterValue("inputGain")->load();
+    float outputGainDb = apvts.getRawParameterValue("outputGain")->load();
+    float mixPercent = apvts.getRawParameterValue("mix")->load();
+
+    float inputGain = juce::Decibels::decibelsToGain(inputGainDb);
+    float outputGain = juce::Decibels::decibelsToGain(outputGainDb);
+    float wetMix = mixPercent / 100.0f;
+    float dryMix = 1.0f - wetMix;
+
+    // Check if we have sidechain input (buffer has more than 2 channels)
+    const int numBufferChannels = buffer.getNumChannels();
+    const int mainChannels = 2;  // Stereo main
+    const bool hasSidechainInput = (numBufferChannels > mainChannels);
+    const int numSamples = buffer.getNumSamples();
+
+    // Store dry signal for mix
+    juce::AudioBuffer<float> dryBuffer;
+    if (dryMix > 0.0f)
+    {
+        dryBuffer.setSize(mainChannels, numSamples, false, false, true);
+        for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+            dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+    }
+
+    // Apply input gain to main channels only
+    for (int ch = 0; ch < mainChannels && ch < numBufferChannels; ++ch)
+        buffer.applyGain(ch, 0, numSamples, inputGain);
+
+    // Measure master input levels (after input gain)
+    if (numBufferChannels >= 2)
+    {
+        float peakL = buffer.getMagnitude(0, 0, numSamples);
+        float peakR = buffer.getMagnitude(1, 0, numSamples);
+        // Simple peak hold with decay
+        float currentL = masterInputLevelL.load();
+        float currentR = masterInputLevelR.load();
+        masterInputLevelL.store(peakL > currentL ? peakL : currentL * 0.95f);
+        masterInputLevelR.store(peakR > currentR ? peakR : currentR * 0.95f);
+    }
+
+    // Process effect chains (single-chain or multiband)
+    if (multibandEnabled.load())
+    {
+        // === MULTIBAND PROCESSING ===
+        // Split input into 3 frequency bands
+        multibandProcessor.split(buffer, bandBuffers);
+
+        // Process each band's independent effect chain
+        for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+        {
+            if (!bandChains[b].empty())
+                processEffectChain(bandChains[b], bandBuffers[b], midiMessages,
+                                   numSamples, false, 2);
+        }
+
+        // Sum bands back (applies per-band gain/solo/mute)
+        multibandProcessor.sumBands(bandBuffers, buffer);
+    }
+    else
+    {
+        // === SINGLE-CHAIN PROCESSING ===
+        processEffectChain(effectChain, buffer, midiMessages,
+                           numSamples, hasSidechainInput, numBufferChannels);
     }
 
     // Apply wet/dry mix
@@ -1181,13 +1444,175 @@ juce::AudioProcessorEditor* UhbikWrapperAudioProcessor::createEditor()
     return new UhbikWrapperAudioProcessorEditor (*this);
 }
 
+// Helper: save a chain of EffectSlots as child nodes of a parent ValueTree
+void UhbikWrapperAudioProcessor::saveChainToState(const std::vector<EffectSlot>& chain,
+                                                    juce::ValueTree& parent,
+                                                    const juce::String& childType)
+{
+    for (size_t i = 0; i < chain.size(); ++i)
+    {
+        auto& slot = chain[i];
+        juce::ValueTree slotState(childType);
+        slotState.setProperty("index", static_cast<int>(i), nullptr);
+        slotState.setProperty("bypassed", slot.bypassed, nullptr);
+        slotState.setProperty("pluginName", slot.description.name, nullptr);
+
+        slotState.setProperty("inputGainDb", slot.inputGainDb.load(), nullptr);
+        slotState.setProperty("outputGainDb", slot.outputGainDb.load(), nullptr);
+        slotState.setProperty("mixPercent", slot.mixPercent.load(), nullptr);
+
+        slotState.setProperty("format", slot.description.format == UnifiedPluginDescription::Format::CLAP ? "CLAP" : "VST3", nullptr);
+
+        if (slot.isVST3())
+        {
+            auto descXml = slot.description.vst3Desc.createXml();
+            if (descXml != nullptr)
+                slotState.setProperty("description", descXml->toString(), nullptr);
+
+            if (slot.vst3Plugin != nullptr)
+            {
+                juce::MemoryBlock pluginState;
+                slot.vst3Plugin->getStateInformation(pluginState);
+                slotState.setProperty("pluginState", pluginState.toBase64Encoding(), nullptr);
+            }
+        }
+        else if (slot.isCLAP())
+        {
+            slotState.setProperty("clapPluginId", slot.description.clapDesc.pluginId, nullptr);
+            slotState.setProperty("clapPluginPath", slot.description.clapDesc.pluginPath, nullptr);
+            slotState.setProperty("clapVendor", slot.description.clapDesc.vendor, nullptr);
+            slotState.setProperty("clapName", slot.description.clapDesc.name, nullptr);
+            slotState.setProperty("clapVersion", slot.description.clapDesc.version, nullptr);
+
+            if (slot.clapPlugin != nullptr)
+            {
+                juce::MemoryBlock clapState;
+                slot.clapPlugin->getState(clapState);
+                if (clapState.getSize() > 0)
+                    slotState.setProperty("pluginState", clapState.toBase64Encoding(), nullptr);
+            }
+        }
+
+        parent.addChild(slotState, -1, nullptr);
+    }
+}
+
+// Helper: restore a chain of EffectSlots from child nodes of a parent ValueTree
+void UhbikWrapperAudioProcessor::restoreChainFromState(std::vector<EffectSlot>& chain,
+                                                         const juce::ValueTree& parent,
+                                                         const juce::String& childType)
+{
+    double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+    int bs = getBlockSize() > 0 ? getBlockSize() : 512;
+
+    for (int i = 0; i < parent.getNumChildren(); ++i)
+    {
+        auto slotState = parent.getChild(i);
+        if (slotState.getType().toString() != childType)
+            continue;
+
+        juce::String pluginName = slotState.getProperty("pluginName", "Unknown");
+        juce::String format = slotState.getProperty("format", "VST3").toString();
+
+        if (format == "CLAP")
+        {
+            CLAPPluginDescription clapDesc;
+            clapDesc.pluginId = slotState.getProperty("clapPluginId", "").toString();
+            clapDesc.pluginPath = slotState.getProperty("clapPluginPath", "").toString();
+            clapDesc.vendor = slotState.getProperty("clapVendor", "").toString();
+            clapDesc.name = slotState.getProperty("clapName", "").toString();
+            clapDesc.version = slotState.getProperty("clapVersion", "").toString();
+
+            auto clapPlugin = std::make_unique<CLAPPluginInstance>(clapDesc);
+            bool loaded = clapPlugin->load();
+
+            if (loaded && clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
+            {
+                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
+                if (pluginStateBase64.isNotEmpty())
+                {
+                    juce::MemoryBlock pluginStateData;
+                    pluginStateData.fromBase64Encoding(pluginStateBase64);
+                    clapPlugin->setState(pluginStateData.getData(), pluginStateData.getSize());
+                }
+
+                EffectSlot slot;
+                slot.clapPlugin = std::move(clapPlugin);
+                slot.description.format = UnifiedPluginDescription::Format::CLAP;
+                slot.description.name = clapDesc.name;
+                slot.description.pluginId = clapDesc.pluginId;
+                slot.description.pluginPath = clapDesc.pluginPath;
+                slot.description.vendor = clapDesc.vendor;
+                slot.description.clapDesc = clapDesc;
+                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
+                slot.ready.store(true);
+                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
+                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
+                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
+
+                chain.push_back(std::move(slot));
+            }
+        }
+        else
+        {
+            juce::String descXmlStr = slotState.getProperty("description").toString();
+            auto descElement = juce::XmlDocument::parse(descXmlStr);
+            if (descElement == nullptr)
+                continue;
+
+            juce::PluginDescription desc;
+            desc.loadFromXml(*descElement);
+
+            juce::String errorMsg;
+            auto plugin = pluginFormatManager.createPluginInstance(desc, sr, bs, errorMsg);
+
+            if (plugin != nullptr)
+            {
+                if (plugin->getBusCount(true) > 1)
+                {
+                    auto* pluginSidechain = plugin->getBus(true, 1);
+                    if (pluginSidechain != nullptr)
+                        pluginSidechain->enable(true);
+                }
+
+                plugin->prepareToPlay(sr, bs);
+
+                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
+                if (pluginStateBase64.isNotEmpty())
+                {
+                    juce::MemoryBlock pluginStateData;
+                    pluginStateData.fromBase64Encoding(pluginStateBase64);
+                    plugin->setStateInformation(pluginStateData.getData(), static_cast<int>(pluginStateData.getSize()));
+                }
+
+                EffectSlot slot;
+                slot.vst3Plugin = std::move(plugin);
+                slot.description.format = UnifiedPluginDescription::Format::VST3;
+                slot.description.name = desc.name;
+                slot.description.pluginId = desc.uniqueId != 0 ? juce::String(desc.uniqueId) : desc.fileOrIdentifier;
+                slot.description.pluginPath = desc.fileOrIdentifier;
+                slot.description.vendor = desc.manufacturerName;
+                slot.description.isInstrument = desc.isInstrument;
+                slot.description.vst3Desc = desc;
+                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
+                slot.ready.store(true);
+                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
+                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
+                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
+
+                chain.push_back(std::move(slot));
+            }
+        }
+    }
+}
+
 void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (debugLogging.load())
         std::cerr << "[RACK] getStateInformation called. Chain size: " << effectChain.size() << std::endl << std::flush;
 
     juce::ValueTree state("EffectChainState");
-    state.setProperty("version", 4, nullptr);  // Version 4 adds ducker
+    state.setProperty("version", 5, nullptr);  // Version 5 adds multiband
     state.setProperty("chainSize", static_cast<int>(effectChain.size()), nullptr);
 
     // Save UI state
@@ -1202,72 +1627,32 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
     state.setProperty("duckerReleaseMs", duckerReleaseMs.load(), nullptr);
     state.setProperty("duckerHoldMs", duckerHoldMs.load(), nullptr);
 
+    // Save multiband state
+    state.setProperty("multibandEnabled", multibandEnabled.load(), nullptr);
+    state.setProperty("lowMidCrossover", multibandProcessor.getLowMidCrossover(), nullptr);
+    state.setProperty("midHighCrossover", multibandProcessor.getMidHighCrossover(), nullptr);
+
+    for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+    {
+        state.setProperty("bandGainDb" + juce::String(b), multibandProcessor.bandStates[b].gainDb.load(), nullptr);
+        state.setProperty("bandSolo" + juce::String(b), multibandProcessor.bandStates[b].solo.load(), nullptr);
+        state.setProperty("bandMute" + juce::String(b), multibandProcessor.bandStates[b].mute.load(), nullptr);
+    }
+
     // Save APVTS parameters
     auto apvtsState = apvts.copyState();
     state.addChild(apvtsState, -1, nullptr);
 
-    for (size_t i = 0; i < effectChain.size(); ++i)
+    // Save single-chain slots
+    saveChainToState(effectChain, state, "Slot");
+
+    // Save band chains
+    for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
     {
-        auto& slot = effectChain[i];
-        juce::ValueTree slotState("Slot");
-        slotState.setProperty("index", static_cast<int>(i), nullptr);
-        slotState.setProperty("bypassed", slot.bypassed, nullptr);
-        slotState.setProperty("pluginName", slot.description.name, nullptr);
-
-        // Per-slot mixing parameters
-        slotState.setProperty("inputGainDb", slot.inputGainDb.load(), nullptr);
-        slotState.setProperty("outputGainDb", slot.outputGainDb.load(), nullptr);
-        slotState.setProperty("mixPercent", slot.mixPercent.load(), nullptr);
-
-        // Save format type
-        slotState.setProperty("format", slot.description.format == UnifiedPluginDescription::Format::CLAP ? "CLAP" : "VST3", nullptr);
-
-        if (slot.isVST3())
-        {
-            // VST3: Save PluginDescription XML
-            auto descXml = slot.description.vst3Desc.createXml();
-            if (descXml != nullptr)
-            {
-                slotState.setProperty("description", descXml->toString(), nullptr);
-                if (debugLogging.load())
-                    std::cerr << "[RACK] Saving VST3 slot " << i << ": " << slot.description.name << std::endl << std::flush;
-            }
-
-            if (slot.vst3Plugin != nullptr)
-            {
-                juce::MemoryBlock pluginState;
-                slot.vst3Plugin->getStateInformation(pluginState);
-                slotState.setProperty("pluginState", pluginState.toBase64Encoding(), nullptr);
-                if (debugLogging.load())
-                    std::cerr << "[RACK] Saved VST3 state size: " << pluginState.getSize() << std::endl << std::flush;
-            }
-        }
-        else if (slot.isCLAP())
-        {
-            // CLAP: Save CLAPPluginDescription fields
-            slotState.setProperty("clapPluginId", slot.description.clapDesc.pluginId, nullptr);
-            slotState.setProperty("clapPluginPath", slot.description.clapDesc.pluginPath, nullptr);
-            slotState.setProperty("clapVendor", slot.description.clapDesc.vendor, nullptr);
-            slotState.setProperty("clapName", slot.description.clapDesc.name, nullptr);
-            slotState.setProperty("clapVersion", slot.description.clapDesc.version, nullptr);
-
-            if (debugLogging.load())
-                std::cerr << "[RACK] Saving CLAP slot " << i << ": " << slot.description.name << std::endl << std::flush;
-
-            if (slot.clapPlugin != nullptr)
-            {
-                juce::MemoryBlock clapState;
-                slot.clapPlugin->getState(clapState);
-                if (clapState.getSize() > 0)
-                {
-                    slotState.setProperty("pluginState", clapState.toBase64Encoding(), nullptr);
-                    if (debugLogging.load())
-                        std::cerr << "[RACK] Saved CLAP state size: " << clapState.getSize() << std::endl << std::flush;
-                }
-            }
-        }
-
-        state.addChild(slotState, -1, nullptr);
+        juce::ValueTree bandState("Band");
+        bandState.setProperty("index", b, nullptr);
+        saveChainToState(bandChains[b], bandState, "Slot");
+        state.addChild(bandState, -1, nullptr);
     }
 
     auto xml = state.createXml();
@@ -1281,31 +1666,20 @@ void UhbikWrapperAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
 
 void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // Always log restore start to debug crashes
     std::cerr << "[RACK] setStateInformation called. Data size: " << sizeInBytes << std::endl << std::flush;
 
     if (data == nullptr || sizeInBytes == 0)
-    {
-        if (debugLogging.load())
-            std::cerr << "[RACK] No state data to restore" << std::endl << std::flush;
         return;
-    }
 
     auto xml = getXmlFromBinary(data, sizeInBytes);
     if (xml == nullptr)
-    {
-        if (debugLogging.load())
-            std::cerr << "[RACK] Failed to parse XML from binary" << std::endl << std::flush;
         return;
-    }
 
     juce::ValueTree state = juce::ValueTree::fromXml(*xml);
     if (!state.isValid() || state.getType().toString() != "EffectChainState")
-    {
-        if (debugLogging.load())
-            std::cerr << "[RACK] Invalid state format" << std::endl << std::flush;
         return;
-    }
+
+    int version = state.getProperty("version", 1);
 
     // Restore UI state
     debugLogging.store(static_cast<bool>(state.getProperty("debugLogging", false)));
@@ -1322,171 +1696,59 @@ void UhbikWrapperAudioProcessor::setStateInformation (const void* data, int size
     // Restore APVTS parameters
     auto apvtsChild = state.getChildWithName("Parameters");
     if (apvtsChild.isValid())
-    {
         apvts.replaceState(apvtsChild);
-        if (debugLogging.load())
-            std::cerr << "[RACK] APVTS state restored" << std::endl << std::flush;
-    }
 
-    int savedChainSize = state.getProperty("chainSize", 0);
-    if (debugLogging.load())
-        std::cerr << "[RACK] Restoring " << savedChainSize << " plugins" << std::endl << std::flush;
-
+    // Restore single-chain
     std::vector<EffectSlot> newChain;
+    restoreChainFromState(newChain, state, "Slot");
 
-    for (int i = 0; i < state.getNumChildren(); ++i)
+    // Restore multiband state (version 5+)
+    std::vector<EffectSlot> newBandChains[MultibandProcessor::NUM_BANDS];
+
+    if (version >= 5)
     {
-        auto slotState = state.getChild(i);
-        if (slotState.getType().toString() != "Slot")
-            continue;
+        multibandEnabled.store(static_cast<bool>(state.getProperty("multibandEnabled", false)));
+        multibandProcessor.setLowMidCrossover(static_cast<float>(state.getProperty("lowMidCrossover", 200.0f)));
+        multibandProcessor.setMidHighCrossover(static_cast<float>(state.getProperty("midHighCrossover", 2000.0f)));
 
-        juce::String pluginName = slotState.getProperty("pluginName", "Unknown");
-        juce::String format = slotState.getProperty("format", "VST3").toString();
-
-        if (debugLogging.load())
-            std::cerr << "[RACK] Restoring " << format << " slot " << i << ": " << pluginName << std::endl << std::flush;
-
-        double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
-        int bs = getBlockSize() > 0 ? getBlockSize() : 512;
-
-        if (format == "CLAP")
+        for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
         {
-            // Restore CLAP plugin
-            std::cerr << "[RACK] Restoring CLAP plugin..." << std::endl << std::flush;
+            multibandProcessor.bandStates[b].gainDb.store(
+                static_cast<float>(state.getProperty("bandGainDb" + juce::String(b), 0.0f)));
+            multibandProcessor.bandStates[b].solo.store(
+                static_cast<bool>(state.getProperty("bandSolo" + juce::String(b), false)));
+            multibandProcessor.bandStates[b].mute.store(
+                static_cast<bool>(state.getProperty("bandMute" + juce::String(b), false)));
+        }
 
-            CLAPPluginDescription clapDesc;
-            clapDesc.pluginId = slotState.getProperty("clapPluginId", "").toString();
-            clapDesc.pluginPath = slotState.getProperty("clapPluginPath", "").toString();
-            clapDesc.vendor = slotState.getProperty("clapVendor", "").toString();
-            clapDesc.name = slotState.getProperty("clapName", "").toString();
-            clapDesc.version = slotState.getProperty("clapVersion", "").toString();
-
-            std::cerr << "[RACK] CLAP desc: " << clapDesc.name << " path=" << clapDesc.pluginPath << std::endl << std::flush;
-
-            auto clapPlugin = std::make_unique<CLAPPluginInstance>(clapDesc);
-            std::cerr << "[RACK] CLAP instance created, loading..." << std::endl << std::flush;
-
-            bool loaded = clapPlugin->load();
-            std::cerr << "[RACK] CLAP load result: " << (loaded ? "OK" : "FAILED") << std::endl << std::flush;
-
-            if (loaded && clapPlugin->activate(sr, 1, static_cast<uint32_t>(bs)))
+        // Restore band chains from <Band> elements
+        for (int i = 0; i < state.getNumChildren(); ++i)
+        {
+            auto child = state.getChild(i);
+            if (child.getType().toString() == "Band")
             {
-                // Restore CLAP state
-                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
-                if (pluginStateBase64.isNotEmpty())
-                {
-                    juce::MemoryBlock pluginStateData;
-                    pluginStateData.fromBase64Encoding(pluginStateBase64);
-                    clapPlugin->setState(pluginStateData.getData(), pluginStateData.getSize());
-                    if (debugLogging.load())
-                        std::cerr << "[RACK] Restored CLAP state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
-                }
-
-                EffectSlot slot;
-                slot.clapPlugin = std::move(clapPlugin);
-                slot.description.format = UnifiedPluginDescription::Format::CLAP;
-                slot.description.name = clapDesc.name;
-                slot.description.pluginId = clapDesc.pluginId;
-                slot.description.pluginPath = clapDesc.pluginPath;
-                slot.description.vendor = clapDesc.vendor;
-                slot.description.clapDesc = clapDesc;
-                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
-                slot.ready.store(true);
-
-                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
-                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
-                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
-
-                newChain.push_back(std::move(slot));
-                if (debugLogging.load())
-                    std::cerr << "[RACK] CLAP plugin restored successfully" << std::endl << std::flush;
-            }
-            else
-            {
-                if (debugLogging.load())
-                    std::cerr << "[RACK] Failed to load/activate CLAP plugin" << std::endl << std::flush;
+                int bandIndex = child.getProperty("index", -1);
+                if (bandIndex >= 0 && bandIndex < MultibandProcessor::NUM_BANDS)
+                    restoreChainFromState(newBandChains[bandIndex], child, "Slot");
             }
         }
-        else
-        {
-            // Restore VST3 plugin
-            juce::String descXmlStr = slotState.getProperty("description").toString();
-            auto descElement = juce::XmlDocument::parse(descXmlStr);
-            if (descElement == nullptr)
-            {
-                if (debugLogging.load())
-                    std::cerr << "[RACK] Failed to parse VST3 plugin description XML" << std::endl << std::flush;
-                continue;
-            }
-
-            juce::PluginDescription desc;
-            desc.loadFromXml(*descElement);
-
-            juce::String errorMsg;
-            auto plugin = pluginFormatManager.createPluginInstance(desc, sr, bs, errorMsg);
-
-            if (plugin != nullptr)
-            {
-                // Always enable sidechain on hosted plugins that support it
-                int numInputBuses = plugin->getBusCount(true);
-                if (numInputBuses > 1)
-                {
-                    auto* pluginSidechain = plugin->getBus(true, 1);
-                    if (pluginSidechain != nullptr)
-                    {
-                        if (debugLogging.load())
-                            std::cerr << "[RACK] Enabling sidechain bus during restore" << std::endl << std::flush;
-                        pluginSidechain->enable(true);
-                    }
-                }
-
-                plugin->prepareToPlay(sr, bs);
-
-                juce::String pluginStateBase64 = slotState.getProperty("pluginState").toString();
-                if (pluginStateBase64.isNotEmpty())
-                {
-                    juce::MemoryBlock pluginStateData;
-                    pluginStateData.fromBase64Encoding(pluginStateBase64);
-                    plugin->setStateInformation(pluginStateData.getData(), static_cast<int>(pluginStateData.getSize()));
-                    if (debugLogging.load())
-                        std::cerr << "[RACK] Restored VST3 state: " << pluginStateData.getSize() << " bytes" << std::endl << std::flush;
-                }
-
-                EffectSlot slot;
-                slot.vst3Plugin = std::move(plugin);
-                slot.description.format = UnifiedPluginDescription::Format::VST3;
-                slot.description.name = desc.name;
-                slot.description.pluginId = desc.uniqueId != 0 ? juce::String(desc.uniqueId) : desc.fileOrIdentifier;
-                slot.description.pluginPath = desc.fileOrIdentifier;
-                slot.description.vendor = desc.manufacturerName;
-                slot.description.isInstrument = desc.isInstrument;
-                slot.description.vst3Desc = desc;
-                slot.bypassed = static_cast<bool>(slotState.getProperty("bypassed", false));
-                slot.ready.store(true);
-
-                slot.inputGainDb.store(static_cast<float>(slotState.getProperty("inputGainDb", 0.0f)));
-                slot.outputGainDb.store(static_cast<float>(slotState.getProperty("outputGainDb", 0.0f)));
-                slot.mixPercent.store(static_cast<float>(slotState.getProperty("mixPercent", 100.0f)));
-
-                newChain.push_back(std::move(slot));
-                if (debugLogging.load())
-                    std::cerr << "[RACK] VST3 plugin restored successfully" << std::endl << std::flush;
-            }
-            else
-            {
-                if (debugLogging.load())
-                    std::cerr << "[RACK] Failed to create VST3 plugin: " << errorMsg << std::endl << std::flush;
-            }
-        }
+    }
+    else
+    {
+        // Pre-v5 state: multiband disabled
+        multibandEnabled.store(false);
     }
 
     {
         const juce::SpinLock::ScopedLockType lock(chainLock);
         effectChain = std::move(newChain);
+        for (int b = 0; b < MultibandProcessor::NUM_BANDS; ++b)
+            bandChains[b] = std::move(newBandChains[b]);
     }
 
     if (debugLogging.load())
-        std::cerr << "[RACK] State restored. Chain size: " << effectChain.size() << std::endl << std::flush;
+        std::cerr << "[RACK] State restored. Chain size: " << effectChain.size()
+                  << " Multiband: " << (multibandEnabled.load() ? "ON" : "OFF") << std::endl << std::flush;
     sendChangeMessage();
 }
 

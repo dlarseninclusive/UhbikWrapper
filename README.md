@@ -4,11 +4,17 @@ A lightweight, "Reason-style" VST3/CLAP wrapper designed specifically for hostin
 
 **Available formats:** VST3, CLAP, AU (macOS)
 
-![Uhbik Wrapper Screenshot](docs/screenshot.png)
+![Uhbik Wrapper Screenshot](docs/screenshot_multiband.png)
 
 ## Features
 
 *   **Effect Chain**: Load unlimited VST3 and CLAP effects in series
+*   **Multiband Processing**: Split audio into 3 frequency bands (Low/Mid/High) with independent effect chains per band
+    - Linkwitz-Riley 24dB/oct crossover filters for phase-coherent splitting
+    - Adjustable crossover frequencies (Low/Mid and Mid/High)
+    - Per-band gain, solo, and mute controls
+    - MAIN/LOW/MID/HIGH tab interface for switching between chains
+*   **Plugin Browser**: Sorted alphabetically with type filter (All/Effects/Instruments)
 *   **Plugin Scanner**: Automatically discovers VST3 plugins in `~/.vst3/` and CLAP plugins in `~/.clap/`
 *   **Rack-Style GUI**: Dark rack interface with orange header, inspired by hardware rack units
 *   **Per-Effect Controls**:
@@ -130,6 +136,8 @@ Presets are stored in `~/Documents/UhbikWrapper/Presets/`
 *   `Source/EffectSlot.cpp`: Per-effect slot UI component
 *   `Source/CLAPPluginHost.cpp`: CLAP plugin hosting implementation
 *   `Source/CLAPPluginHost.h`: CLAP scanner, loader, and parameter modulation
+*   `Source/MultibandProcessor.cpp`: 3-band Linkwitz-Riley crossover filter implementation
+*   `Source/MultibandProcessor.h`: Crossover filter class with per-band state
 *   `Source/LFO.h`: LFO modulation source and routing structures
 *   `Source/Envelope.h`: DAHDSR envelope generator
 *   `Source/StepSequencer.h`: Step sequencer with tempo sync
@@ -211,6 +219,9 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [x] **Built-in Ducker**: Sidechain-triggered volume ducking with threshold, amount, attack, release, hold
 - [x] **Modulation System**: 4 LFOs, 2 Envelopes, 2 Step Sequencers, Mod Matrix (CLAP plugins)
 - [x] **CLAP Parameter Modulation**: Full support for CLAP_PARAM_IS_MODULATABLE parameters
+- [x] **Multiband Processing**: 3-band Linkwitz-Riley crossover with independent effect chains per band
+- [x] **Plugin Type Filter**: Filter plugin list by All/Effects/Instruments with alphabetical sorting
+- [x] **Instrument Hosting**: Load instrument plugins (synths, samplers) in addition to effects
 
 ### Ducker (Planned)
 - [ ] **Ducker Presets**: Save/load ducker settings independently from effect chain

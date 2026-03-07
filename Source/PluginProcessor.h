@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "CLAPPluginHost.h"
+#include "MultibandProcessor.h"
 #include "LFO.h"
 #include "Envelope.h"
 #include "StepSequencer.h"
@@ -171,6 +172,25 @@ public:
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
     const std::vector<UnifiedPluginDescription>& getAvailablePlugins() const { return availablePlugins; }
 
+    // --- Multiband Processing ---
+    std::atomic<bool> multibandEnabled{false};
+    MultibandProcessor multibandProcessor;
+
+    // Per-band effect chains (3 bands: low, mid, high)
+    std::vector<EffectSlot> bandChains[MultibandProcessor::NUM_BANDS];
+
+    // Band chain management (mirrors single-chain API)
+    void addPluginToBand(int bandIndex, const UnifiedPluginDescription& desc);
+    void removePluginFromBand(int bandIndex, int slotIndex);
+    void movePluginInBand(int bandIndex, int fromIndex, int toIndex);
+    void clearBand(int bandIndex);
+    void clearAllBands();
+    int getBandChainSize(int bandIndex) const;
+
+    // Crossover frequency control
+    void setLowMidCrossover(float freqHz);
+    void setMidHighCrossover(float freqHz);
+
     // Preset management
     static juce::File getPresetsFolder();
     static void ensurePresetsFolderExists();
@@ -254,6 +274,21 @@ private:
 
     // Cached macro parameter pointers (avoid string lookup on audio thread)
     std::atomic<float>* macroParams[NUM_MACROS] = {nullptr};
+
+    // Multiband: pre-allocated band buffers (sized in prepareToPlay, used in processBlock)
+    juce::AudioBuffer<float> bandBuffers[MultibandProcessor::NUM_BANDS];
+
+    // Shared helper: processes an effect chain on a buffer (used for single-chain and per-band)
+    void processEffectChain(std::vector<EffectSlot>& chain,
+                            juce::AudioBuffer<float>& buffer,
+                            juce::MidiBuffer& midi,
+                            int numSamples,
+                            bool hasSidechainInput,
+                            int numBufferChannels);
+
+    // Helper to save/restore a single effect chain to/from a ValueTree
+    void saveChainToState(const std::vector<EffectSlot>& chain, juce::ValueTree& parent, const juce::String& childType);
+    void restoreChainFromState(std::vector<EffectSlot>& chain, const juce::ValueTree& parent, const juce::String& childType);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UhbikWrapperAudioProcessor)
 };

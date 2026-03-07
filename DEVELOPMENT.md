@@ -213,53 +213,43 @@ void handleMidiLearn(const juce::MidiMessage& msg)
 }
 ```
 
-### Phase 7: Multiband Processing
+### Phase 7: Multiband Processing ✅ IMPLEMENTED
 
 **Goal:** Split audio into frequency bands, each with its own independent effect chain (inspired by Kilohearts Multipass)
 
 **Requested by:** KVR user Dirtgrain (Jan 2026)
 
-**Core concepts:**
-- Crossover filter splits input into N bands (2-4 bands typical)
-- Each band has its own independent effect chain (reusing existing EffectSlot system)
-- Bands are summed back together after processing
-- User-adjustable crossover frequencies
-- Solo/mute per band
-- Optional linear-phase crossover mode
+**Status:** Fully implemented. MAIN/LOW/MID/HIGH tab interface with independent effect chains per band.
 
-**Key components:**
-```cpp
-struct FrequencyBand {
-    float lowFreq;                              // Band low cutoff (Hz)
-    float highFreq;                             // Band high cutoff (Hz)
-    std::vector<EffectSlot> effectChain;        // Independent chain per band
-    bool solo = false;
-    bool mute = false;
-    float gain = 0.0f;                          // Per-band gain (dB)
-};
+**Implementation:**
+- `MultibandProcessor` class (`Source/MultibandProcessor.h/.cpp`) encapsulates crossover logic
+- Linkwitz-Riley 24dB/oct (4th order) crossover filters for phase-coherent band splitting
+- 3 fixed bands: Low, Mid, High with 2 adjustable crossover frequencies
+- Per-band independent effect chains (`bandChains[3]` in PluginProcessor)
+- Per-band gain (-24 to +24 dB), solo, and mute controls
+- Pre-allocated band buffers to avoid audio-thread allocations
+- Per-sample crossover processing via `processSample()` for zero-allocation operation
+- State serialization v5 with full backward compatibility (v4 presets load normally)
 
-class MultibandProcessor {
-    std::vector<FrequencyBand> bands;
-    juce::dsp::LinkwitzRileyFilter<float> crossoverFilters;
-    int numBands = 3;                           // Default 3-band
-    // Crossover frequencies adjustable via UI
-};
+**Crossover topology:**
+```
+Input ──┬── LP1(lowMidFreq) ──────────────────→ Low band
+        └── HP1(lowMidFreq) ──┬── LP2(midHighFreq) ─→ Mid band
+                               └── HP2(midHighFreq) ─→ High band
 ```
 
-**UI concept:**
-- Toggle between single-chain mode (current) and multiband mode
-- Horizontal band visualization with draggable crossover points
-- Each band expands to show its own effect chain
-- Band controls: solo, mute, gain, bypass
+**UI:**
+- MAIN / LOW / MID / HIGH tab buttons (always visible, color-coded) to switch displayed chain
+- MAIN tab shows single-chain mode; LOW/MID/HIGH tabs enable multiband processing
+- Crossover frequency sliders with logarithmic skew
+- Per-band Solo (S), Mute (M), and gain slider controls
+- Plugin type filter dropdown (All/Effects/Instruments) with alphabetical sorting
+- Existing chain viewport shows the active band's effect chain
 
-**Implementation steps:**
-1. Create crossover filter system using Linkwitz-Riley filters (juce_dsp)
-2. Create FrequencyBand struct with independent effect chains
-3. Add multiband processing path in processBlock
-4. Design band split visualization with draggable crossover points
-5. Adapt existing chain UI to work per-band
-6. Add single-chain / multiband mode toggle
-7. Persist multiband state in presets
+**Files:**
+- `Source/MultibandProcessor.h` / `.cpp` — Crossover filter class
+- `Source/PluginProcessor.h` / `.cpp` — Band chains, multiband processBlock path, state v5
+- `Source/PluginEditor.h` / `.cpp` — Band selector UI, mode-aware chain display
 
 ---
 
@@ -302,10 +292,11 @@ Legend:
 11. **Phase 5a**: Create SpectrumAnalyzer component (requires juce_dsp)
 12. **Phase 5b**: Add spectrum popup windows
 13. **Phase 6**: Implement MIDI learn system
-14. **Phase 7a**: Create crossover filter system (Linkwitz-Riley)
-15. **Phase 7b**: Implement per-band effect chains
-16. **Phase 7c**: Build multiband UI with draggable crossover points
-17. **Phase 7d**: Add single-chain / multiband mode toggle
+14. ~~**Phase 7a**: Create crossover filter system (Linkwitz-Riley)~~ ✅
+15. ~~**Phase 7b**: Implement per-band effect chains~~ ✅
+16. ~~**Phase 7c**: Build multiband UI with band tabs and crossover sliders~~ ✅
+17. ~~**Phase 7d**: MAIN/LOW/MID/HIGH tab interface (replaces toggle)~~ ✅
+18. ~~**Phase 8**: Plugin type filter (All/Effects/Instruments) and alphabetical sorting~~ ✅
 
 ---
 
