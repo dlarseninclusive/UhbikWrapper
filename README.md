@@ -221,7 +221,7 @@ The release will appear at: https://github.com/dlarseninclusive/UhbikWrapper/rel
 - [x] **CLAP Parameter Modulation**: Full support for CLAP_PARAM_IS_MODULATABLE parameters
 - [x] **Multiband Processing**: 3-band Linkwitz-Riley crossover with independent effect chains per band
 - [x] **Plugin Type Filter**: Filter plugin list by All/Effects/Instruments with alphabetical sorting
-- [x] **Instrument Hosting**: Load instrument plugins (synths, samplers) in addition to effects
+- [x] **Instrument Hosting**: Load instrument plugins (synths, samplers) — standalone only, MIDI routing in DAW hosts is in development
 
 ### Ducker (Planned)
 - [ ] **Ducker Presets**: Save/load ducker settings independently from effect chain
