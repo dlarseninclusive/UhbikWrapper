@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <set>
 
 juce::AudioProcessorValueTreeState::ParameterLayout UhbikWrapperAudioProcessor::createParameterLayout()
 {
@@ -160,11 +161,15 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
         std::cerr << "[RACK] CLAP scan complete. Found: " << clapScanner.getPlugins().size() << std::endl;
         std::cerr.flush();
 
-        // Add CLAP plugins to unified list
+        // Add CLAP plugins to unified list (deduplicate by pluginId)
+        std::set<juce::String> seenClapIds;
         for (const auto& clapDesc : clapScanner.getPlugins())
         {
-            if (clapDesc.isInstrument)
+            // Skip duplicates (same plugin found in multiple scan paths)
+            if (seenClapIds.count(clapDesc.pluginId))
                 continue;
+            seenClapIds.insert(clapDesc.pluginId);
+
             UnifiedPluginDescription unified;
             unified.format = UnifiedPluginDescription::Format::CLAP;
             unified.name = clapDesc.name + " (CLAP)";
@@ -175,7 +180,7 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
             unified.clapDesc = clapDesc;
             availablePlugins.push_back(unified);
         }
-        std::cerr << "[RACK] CLAP effects added. Total plugins: " << availablePlugins.size() << std::endl;
+        std::cerr << "[RACK] CLAP plugins added. Total plugins: " << availablePlugins.size() << std::endl;
         std::cerr.flush();
 
         // Notify any listeners that the plugin list has changed
@@ -334,10 +339,15 @@ void UhbikWrapperAudioProcessor::removePlugin(int index)
         return;
     }
 
+    // Move slot out of the chain under the lock, then destroy outside the lock.
+    // This prevents the audio thread from accessing the plugin during destruction.
+    EffectSlot removedSlot;
     {
         const juce::SpinLock::ScopedLockType lock(chainLock);
+        removedSlot = std::move(effectChain[static_cast<size_t>(index)]);
         effectChain.erase(effectChain.begin() + index);
     }
+    // removedSlot is destroyed here, safely off the audio thread
 
     if (debugLogging.load())
         std::cerr << "[RACK] Plugin removed. Chain size: " << effectChain.size() << std::endl << std::flush;
@@ -363,10 +373,14 @@ void UhbikWrapperAudioProcessor::clearChain()
     if (debugLogging.load())
         std::cerr << "[RACK] clearChain called. Current size: " << effectChain.size() << std::endl << std::flush;
 
+    // Move all slots out under lock, destroy outside to avoid audio-thread conflicts
+    std::vector<EffectSlot> removedSlots;
     {
         const juce::SpinLock::ScopedLockType lock(chainLock);
+        removedSlots = std::move(effectChain);
         effectChain.clear();
     }
+    removedSlots.clear();  // Destroy plugins safely off the audio thread
 
     if (debugLogging.load())
         std::cerr << "[RACK] Chain cleared. New size: " << effectChain.size() << std::endl << std::flush;
@@ -535,10 +549,14 @@ void UhbikWrapperAudioProcessor::removePluginFromBand(int bandIndex, int slotInd
     if (slotIndex < 0 || slotIndex >= static_cast<int>(bandChains[bandIndex].size()))
         return;
 
+    // Move slot out under lock, destroy outside to avoid audio-thread conflicts
+    EffectSlot removedSlot;
     {
         const juce::SpinLock::ScopedLockType lock(chainLock);
+        removedSlot = std::move(bandChains[bandIndex][static_cast<size_t>(slotIndex)]);
         bandChains[bandIndex].erase(bandChains[bandIndex].begin() + slotIndex);
     }
+    // removedSlot destroyed here, safely off the audio thread
 
     if (debugLogging.load())
         std::cerr << "[RACK] Removed plugin from band " << bandIndex << ". Size: " << bandChains[bandIndex].size() << std::endl << std::flush;
